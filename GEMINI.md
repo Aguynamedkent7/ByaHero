@@ -1,5 +1,14 @@
 # ByaHero: Project Standards & Architecture
 
+## Project Overview
+ByaHero is a real-time Jeepney tracking and route recommendation application designed to improve the commuting experience.
+- **Real-time Tracking:** Commuters can view Jeepney routes and their live locations.
+- **Route Recommendations:** Users can input their destination to receive suggested Jeepney routes, including optimal drop-off points.
+- **Passenger-Driver Interaction:** Commuters can share their location with drivers, allowing drivers to see where potential passengers are waiting along their route.
+- **Authentication:**
+    - **Drivers:** Required to log in to share their location and route status.
+    - **Commuters:** Can use the app anonymously, but must log in to share their location with drivers.
+
 ## Tech Stack
 - **Language:** Kotlin
 - **UI:** Jetpack Compose
@@ -35,3 +44,15 @@ The project will follow a **Feature-based Multi-module** structure:
 - **Compose Stability:** Avoid unnecessary recompositions using `@Stable` and `@Immutable`.
 - **Image Loading:** Use Coil with low-memory configurations.
 - **Network:** Use Supabase's offline-first capabilities where possible.
+
+## TODOs
+- [ ] **Infrastructure:** Setup Supabase project and database schema.
+- [x] **Auth:** Implement Driver and Commuter authentication in `:feature:auth`.
+- [ ] **Map:** Integrate Google Maps SDK and implement real-time location updates in `:feature:map`.
+- [ ] **Search:** Develop route recommendation logic and UI in `:feature:search`.
+- [ ] **Real-time:** Implement location sharing between Commuters and Drivers using Supabase Realtime.
+- [ ] **UI/UX:** Build a consistent design system in `:core:ui` following the provided wireframes.
+- [ ] **Performance:** Implement Baseline Profiles and R8 configurations.
+ters and Drivers using Supabase Realtime.
+- [ ] **UI/UX:** Build a consistent design system in `:core:ui`.
+- [ ] **Performance:** Implement Baseline Profiles and R8 configurations.

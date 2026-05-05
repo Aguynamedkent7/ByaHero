@@ -15,9 +15,12 @@ fun LoginScreen(
     onLoginSuccess: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val isSignUpMode by viewModel.isSignUpMode.collectAsState()
     
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var fullName by remember { mutableStateOf("") }
+    var selectedRole by remember { mutableStateOf("commuter") }
 
     LaunchedEffect(uiState) {
         if (uiState is AuthUiState.Success) {
@@ -33,12 +36,44 @@ fun LoginScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "Welcome to ByaHero",
+            text = if (isSignUpMode) "Create Account" else "Welcome to ByaHero",
             style = MaterialTheme.typography.headlineMedium,
             color = MaterialTheme.colorScheme.primary
         )
         
         Spacer(modifier = Modifier.height(32.dp))
+
+        if (isSignUpMode) {
+            OutlinedTextField(
+                value = fullName,
+                onValueChange = { fullName = it },
+                label = { Text("Full Name") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = selectedRole == "commuter",
+                        onClick = { selectedRole = "commuter" }
+                    )
+                    Text("Commuter")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = selectedRole == "driver",
+                        onClick = { selectedRole = "driver" }
+                    )
+                    Text("Driver")
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
         
         OutlinedTextField(
             value = email,
@@ -60,7 +95,13 @@ fun LoginScreen(
         Spacer(modifier = Modifier.height(24.dp))
         
         Button(
-            onClick = { viewModel.signIn(email, password) },
+            onClick = { 
+                if (isSignUpMode) {
+                    viewModel.signUp(email, password, fullName, selectedRole)
+                } else {
+                    viewModel.signIn(email, password)
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
             enabled = uiState !is AuthUiState.Loading
         ) {
@@ -70,8 +111,18 @@ fun LoginScreen(
                     color = MaterialTheme.colorScheme.onPrimary
                 )
             } else {
-                Text("Login")
+                Text(if (isSignUpMode) "Sign Up" else "Login")
             }
+        }
+
+        TextButton(
+            onClick = { viewModel.toggleMode() },
+            modifier = Modifier.padding(top = 8.dp)
+        ) {
+            Text(
+                if (isSignUpMode) "Already have an account? Login" 
+                else "Don't have an account? Sign Up"
+            )
         }
         
         if (uiState is AuthUiState.Error) {

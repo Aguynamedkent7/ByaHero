@@ -58,6 +58,8 @@ CREATE POLICY "Users can update their own location" ON locations
 
 -- Profiles
 CREATE POLICY "Public can view profiles" ON profiles FOR SELECT USING (true);
+CREATE POLICY "Users can insert own profile" ON profiles 
+  FOR INSERT WITH CHECK (auth.uid() = id);
 CREATE POLICY "Users can update own profile" ON profiles 
   FOR UPDATE USING (auth.uid() = id);
 

@@ -18,6 +18,14 @@ class LoginViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<AuthUiState>(AuthUiState.Idle)
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
+    private val _isSignUpMode = MutableStateFlow(false)
+    val isSignUpMode: StateFlow<Boolean> = _isSignUpMode.asStateFlow()
+
+    fun toggleMode() {
+        _isSignUpMode.value = !_isSignUpMode.value
+        _uiState.value = AuthUiState.Idle
+    }
+
     fun signIn(email: String, password: String) {
         viewModelScope.launch {
             _uiState.value = AuthUiState.Loading
@@ -26,6 +34,18 @@ class LoginViewModel @Inject constructor(
                 _uiState.value = AuthUiState.Success
             } catch (e: Exception) {
                 _uiState.value = AuthUiState.Error(e.message ?: "Login failed")
+            }
+        }
+    }
+
+    fun signUp(email: String, password: String, fullName: String, role: String) {
+        viewModelScope.launch {
+            _uiState.value = AuthUiState.Loading
+            try {
+                authRepository.signUp(email, password, fullName, role)
+                _uiState.value = AuthUiState.Success
+            } catch (e: Exception) {
+                _uiState.value = AuthUiState.Error(e.message ?: "Signup failed")
             }
         }
     }
