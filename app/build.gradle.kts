@@ -48,6 +48,7 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":feature:splash"))
     implementation(project(":feature:auth"))
+    implementation(project(":feature:map"))
     
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

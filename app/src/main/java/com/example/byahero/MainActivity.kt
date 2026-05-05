@@ -17,6 +17,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.byahero.core.ui.theme.ByaHeroTheme
 import com.example.byahero.feature.splash.SplashScreen
 import com.example.byahero.feature.auth.LoginScreen
+import com.example.byahero.feature.map.MapScreen
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -44,13 +45,7 @@ class MainActivity : ComponentActivity() {
                         })
                     }
                     composable("home") {
-                        // Placeholder for Home/Map Screen
-                        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                            Text(
-                                text = "Home / Map Screen Placeholder",
-                                modifier = Modifier.padding(innerPadding)
-                            )
-                        }
+                        MapScreen()
                     }
                 }
             }
