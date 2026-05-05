@@ -1,0 +1,3 @@
+
+-keep,allowobfuscation,allowshrinking class com.example.byahero.feature.auth.LoginViewModel
+-keep,allowobfuscation,allowshrinking class com.example.byahero.feature.auth.LoginViewModel

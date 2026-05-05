@@ -1,12 +1,6 @@
 pluginManagement {
     repositories {
-        google {
-            content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("com\\.google.*")
-                includeGroupByRegex("androidx.*")
-            }
-        }
+        google()
         mavenCentral()
         gradlePluginPortal()
     }
@@ -24,4 +18,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "ByaHero"
 include(":app")
- 
+include(":core:ui")
+include(":core:data")
+include(":feature:splash")
+include(":feature:auth")
