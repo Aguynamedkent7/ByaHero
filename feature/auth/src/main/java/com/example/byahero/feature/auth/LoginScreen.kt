@@ -16,6 +16,7 @@ fun LoginScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val isSignUpMode by viewModel.isSignUpMode.collectAsState()
+    val rememberMe by viewModel.rememberMe.collectAsState()
     
     var loginId by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -92,7 +93,25 @@ fun LoginScreen(
             modifier = Modifier.fillMaxWidth()
         )
         
-        Spacer(modifier = Modifier.height(24.dp))
+        if (!isSignUpMode) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = rememberMe,
+                    onCheckedChange = { viewModel.toggleRememberMe() }
+                )
+                Text(
+                    text = "Remember Me",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
         
         Button(
             onClick = { 

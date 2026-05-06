@@ -56,6 +56,9 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
 
+    // Settings
+    implementation(libs.multiplatform.settings)
+
     // Maps
     implementation(libs.play.services.maps)
     implementation(libs.play.services.location)

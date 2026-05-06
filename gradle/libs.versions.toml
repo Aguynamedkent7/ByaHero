@@ -50,6 +50,7 @@ google-maps-compose = { module = "com.google.maps.android:maps-compose", version
 play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMaps" }
 play-services-location = { module = "com.google.android.gms:play-services-location", version.ref = "playServicesLocation" }
 google-places = { module = "com.google.android.libraries.places:places", version.ref = "places" }
+multiplatform-settings = { module = "com.russhwolf:multiplatform-settings-no-arg", version = "1.2.0" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

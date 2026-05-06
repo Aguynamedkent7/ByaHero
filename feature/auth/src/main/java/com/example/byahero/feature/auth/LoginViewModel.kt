@@ -21,16 +21,23 @@ class LoginViewModel @Inject constructor(
     private val _isSignUpMode = MutableStateFlow(false)
     val isSignUpMode: StateFlow<Boolean> = _isSignUpMode.asStateFlow()
 
+    private val _rememberMe = MutableStateFlow(true)
+    val rememberMe: StateFlow<Boolean> = _rememberMe.asStateFlow()
+
     fun toggleMode() {
         _isSignUpMode.value = !_isSignUpMode.value
         _uiState.value = AuthUiState.Idle
+    }
+
+    fun toggleRememberMe() {
+        _rememberMe.value = !_rememberMe.value
     }
 
     fun signIn(usernameOrEmail: String, password: String) {
         viewModelScope.launch {
             _uiState.value = AuthUiState.Loading
             try {
-                authRepository.signIn(usernameOrEmail, password)
+                authRepository.signIn(usernameOrEmail, password, _rememberMe.value)
                 _uiState.value = AuthUiState.Success
             } catch (e: Exception) {
                 _uiState.value = AuthUiState.Error(e.message ?: "Login failed")

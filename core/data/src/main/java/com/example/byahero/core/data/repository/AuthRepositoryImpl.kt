@@ -1,6 +1,7 @@
 package com.example.byahero.core.data.repository
 
 import com.example.byahero.core.data.SupabaseConfig
+import com.russhwolf.settings.Settings
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.user.UserInfo
@@ -16,6 +17,7 @@ class AuthRepositoryImpl : AuthRepository {
     
     private val auth = SupabaseConfig.client.auth
     private val db = SupabaseConfig.client.postgrest
+    private val settings = Settings()
 
     override val currentUser: Flow<UserInfo?> = auth.sessionStatus.map { 
         auth.currentUserOrNull()
@@ -27,6 +29,9 @@ class AuthRepositoryImpl : AuthRepository {
             this.password = password
         }
         
+        // Default to remember me on signup
+        settings.putBoolean("remember_me", true)
+
         // After signup, create the profile entry
         val user = auth.currentUserOrNull() ?: throw Exception("Signup failed")
         val extractedUsername = email.substringBefore("@")
@@ -42,7 +47,7 @@ class AuthRepositoryImpl : AuthRepository {
         )
     }
 
-    override suspend fun signIn(usernameOrEmail: String, password: String) {
+    override suspend fun signIn(usernameOrEmail: String, password: String, rememberMe: Boolean) {
         val actualEmail = if (usernameOrEmail.contains("@")) {
             usernameOrEmail
         } else {
@@ -59,13 +64,20 @@ class AuthRepositoryImpl : AuthRepository {
             this.email = actualEmail
             this.password = password
         }
+        
+        settings.putBoolean("remember_me", rememberMe)
     }
 
     override suspend fun signOut() {
         auth.signOut()
+        settings.putBoolean("remember_me", false)
     }
 
     override suspend fun isUserLoggedIn(): Boolean {
         return auth.currentUserOrNull() != null
+    }
+
+    override fun canAutoLogin(): Boolean {
+        return auth.currentUserOrNull() != null && settings.getBoolean("remember_me", false)
     }
 }

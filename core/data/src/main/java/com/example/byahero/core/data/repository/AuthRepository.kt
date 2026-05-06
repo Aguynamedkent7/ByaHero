@@ -7,7 +7,8 @@ interface AuthRepository {
     val currentUser: Flow<UserInfo?>
     
     suspend fun signUp(email: String, password: String, fullName: String, role: String)
-    suspend fun signIn(usernameOrEmail: String, password: String)
+    suspend fun signIn(usernameOrEmail: String, password: String, rememberMe: Boolean = true)
     suspend fun signOut()
     suspend fun isUserLoggedIn(): Boolean
+    fun canAutoLogin(): Boolean
 }
