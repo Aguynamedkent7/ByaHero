@@ -57,7 +57,7 @@ class DirectionsRepositoryImpl(private val context: Context) : DirectionsReposit
         return ""
     }
 
-    override suspend fun getWalkingDirections(origin: LatLng, destination: LatLng): List<LatLng> {
+    override suspend fun getWalkingDirections(origin: LatLng, destination: LatLng): WalkingPath? {
         return try {
             val originStr = "${origin.latitude},${origin.longitude}"
             val destStr = "${destination.latitude},${destination.longitude}"
@@ -75,15 +75,19 @@ class DirectionsRepositoryImpl(private val context: Context) : DirectionsReposit
             val directionsResponse = Json { ignoreUnknownKeys = true; isLenient = true }.decodeFromString<DirectionsResponse>(responseBody)
 
             if (directionsResponse.routes.isNotEmpty()) {
-                decodePoly(directionsResponse.routes.first().overview_polyline.points)
+                val route = directionsResponse.routes.first()
+                val path = decodePoly(route.overview_polyline.points)
+                val distance = route.legs.sumOf { it.distance.value }
+                
+                WalkingPath(path, distance)
             } else {
                 Log.e("DirectionsAPI", "No routes found. Raw response: $responseBody")
-                emptyList()
+                null
             }
         } catch (e: Exception) {
             Log.e("DirectionsAPI", "Exception calling Directions API: ${e.message}")
             e.printStackTrace()
-            emptyList()
+            null
         }
     }
 

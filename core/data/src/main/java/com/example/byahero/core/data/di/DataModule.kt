@@ -7,6 +7,9 @@ import com.example.byahero.core.data.repository.RouteRepository
 import com.example.byahero.core.data.repository.RouteRepositoryImpl
 import com.example.byahero.core.data.repository.DirectionsRepository
 import com.example.byahero.core.data.repository.DirectionsRepositoryImpl
+import com.example.byahero.core.data.repository.LocationRepository
+import com.example.byahero.core.data.repository.LocationRepositoryImpl
+import com.example.byahero.core.data.SupabaseConfig
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -34,5 +37,11 @@ object DataModule {
     @Singleton
     fun provideDirectionsRepository(@ApplicationContext context: Context): DirectionsRepository {
         return DirectionsRepositoryImpl(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideLocationRepository(@ApplicationContext context: Context): LocationRepository {
+        return LocationRepositoryImpl(context, SupabaseConfig.client)
     }
 }

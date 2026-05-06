@@ -1,6 +1,8 @@
 package com.example.byahero.feature.map
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -17,10 +19,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,6 +28,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
@@ -38,15 +38,12 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.libraries.places.api.model.Place
 import com.google.android.libraries.places.widget.Autocomplete
 import com.google.android.libraries.places.widget.model.AutocompleteActivityMode
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.Polyline
-import com.google.maps.android.compose.rememberCameraPositionState
+import com.google.maps.android.compose.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
+    val context = LocalContext.current
     val scaffoldState = rememberBottomSheetScaffoldState(
         bottomSheetState = rememberStandardBottomSheetState(
             initialValue = SheetValue.PartiallyExpanded
@@ -59,6 +56,40 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val navigationState by viewModel.navigationState.collectAsState()
+    val userLocation by viewModel.userLocation.collectAsState()
+    val isSharingLocation by viewModel.isSharingLocation.collectAsState()
+
+    // Permission Launcher
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { permissions ->
+            val granted = permissions.entries.all { it.value }
+            if (granted) {
+                viewModel.startLocationTracking()
+            }
+        }
+    )
+
+    // Check permissions and start tracking
+    LaunchedEffect(Unit) {
+        val fineLocationGranted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseLocationGranted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (fineLocationGranted && coarseLocationGranted) {
+            viewModel.startLocationTracking()
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
 
     // USTP CDO Coordinates as default
     val ustpLocation = LatLng(8.4847, 124.6566)
@@ -73,7 +104,7 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
         } else LatLng(0.0, 0.0)
     }
 
-    // Move camera when routes are loaded
+    // Move camera when routes are loaded or navigation starts
     LaunchedEffect(routes, navigationState) {
         if (navigationState is NavigationState.Idle && routes.isNotEmpty()) {
             val firstRoute = routes.first()
@@ -91,7 +122,6 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
         }
     }
 
-    val context = LocalContext.current
     val autocompleteLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
         onResult = { result ->
@@ -99,7 +129,10 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 result.data?.let { intent ->
                     val place = Autocomplete.getPlaceFromIntent(intent)
                     place.latLng?.let { destLatLng ->
-                        viewModel.onDestinationSelected(destLatLng)
+                        viewModel.onDestinationSelected(
+                            destination = destLatLng,
+                            fallbackOrigin = cameraPositionState.position.target
+                        )
                     }
                 }
             }
@@ -111,6 +144,8 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
         sheetPeekHeight = 350.dp,
         sheetContent = {
             CommuterBottomSheetContent(
+                isSharingLocation = isSharingLocation,
+                onToggleSharing = { viewModel.toggleLocationSharing() },
                 onSearchClick = {
                     val intent = Autocomplete.IntentBuilder(
                         AutocompleteActivityMode.OVERLAY,
@@ -129,7 +164,9 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
             GoogleMap(
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState,
-                contentPadding = innerPadding // Let the map handle sheet padding
+                contentPadding = innerPadding,
+                properties = MapProperties(isMyLocationEnabled = userLocation != null),
+                uiSettings = MapUiSettings(myLocationButtonEnabled = true)
             ) {
                 when (val state = navigationState) {
                     is NavigationState.Idle -> {
@@ -173,7 +210,7 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                         // Draw Origin and Destination Markers
                         Marker(
                             state = MarkerState(position = state.origin),
-                            title = "Origin (USTP)",
+                            title = "Origin",
                             snippet = "Walk to pickup"
                         )
                         Marker(
@@ -212,8 +249,9 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 }
             }
 
-            // Top Navigation Overlay (Angkas Style)
+            // Top Navigation Overlay
             TopNavigationOverlay(
+                userLocation = userLocation,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
@@ -224,7 +262,7 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
 }
 
 @Composable
-fun TopNavigationOverlay(modifier: Modifier = Modifier) {
+fun TopNavigationOverlay(userLocation: LatLng?, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -263,7 +301,7 @@ fun TopNavigationOverlay(modifier: Modifier = Modifier) {
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "USTP CDO, Lapasan",
+                    text = if (userLocation != null) "Current Location" else "USTP CDO, Lapasan",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -273,7 +311,11 @@ fun TopNavigationOverlay(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun CommuterBottomSheetContent(onSearchClick: () -> Unit) {
+fun CommuterBottomSheetContent(
+    isSharingLocation: Boolean,
+    onToggleSharing: () -> Unit,
+    onSearchClick: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -300,6 +342,40 @@ fun CommuterBottomSheetContent(onSearchClick: () -> Unit) {
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Location Sharing Toggle
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        ) {
+            Row(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Share Location with Drivers",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Allows drivers to see you on the map",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = isSharingLocation,
+                    onCheckedChange = { onToggleSharing() }
                 )
             }
         }
