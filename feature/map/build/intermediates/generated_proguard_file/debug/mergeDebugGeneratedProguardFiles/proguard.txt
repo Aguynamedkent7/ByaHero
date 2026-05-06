@@ -1,2 +1,0 @@
--keep,allowobfuscation,allowshrinking class com.example.byahero.feature.map.MapViewModel
--keep,allowobfuscation,allowshrinking class com.example.byahero.feature.map.MapViewModel
