@@ -18,12 +18,18 @@ import com.example.byahero.core.ui.theme.ByaHeroTheme
 import com.example.byahero.feature.splash.SplashScreen
 import com.example.byahero.feature.auth.LoginScreen
 import com.example.byahero.feature.map.MapScreen
+import com.google.android.libraries.places.api.Places
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        if (!Places.isInitialized()) {
+            Places.initialize(applicationContext, BuildConfig.MAPS_API_KEY)
+        }
+        
         enableEdgeToEdge()
         setContent {
             ByaHeroTheme {

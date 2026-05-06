@@ -1,5 +1,8 @@
 package com.example.byahero.feature.map
 
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,6 +18,7 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -22,19 +26,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.Dot
+import com.google.android.gms.maps.model.Gap
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.libraries.places.api.model.Place
+import com.google.android.libraries.places.widget.Autocomplete
+import com.google.android.libraries.places.widget.model.AutocompleteActivityMode
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
-
-import androidx.compose.runtime.LaunchedEffect
-import com.google.android.gms.maps.CameraUpdateFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +58,7 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
     val routes by viewModel.routes.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
+    val navigationState by viewModel.navigationState.collectAsState()
 
     // USTP CDO Coordinates as default
     val ustpLocation = LatLng(8.4847, 124.6566)
@@ -65,8 +74,8 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
     }
 
     // Move camera when routes are loaded
-    LaunchedEffect(routes) {
-        if (routes.isNotEmpty()) {
+    LaunchedEffect(routes, navigationState) {
+        if (navigationState is NavigationState.Idle && routes.isNotEmpty()) {
             val firstRoute = routes.first()
             val firstPoint = firstRoute.pathCoordinates.firstOrNull()?.toLatLng()
             if (firstPoint != null) {
@@ -74,14 +83,42 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                     CameraUpdateFactory.newLatLngZoom(firstPoint, 14f)
                 )
             }
+        } else if (navigationState is NavigationState.Navigating) {
+            val dest = (navigationState as NavigationState.Navigating).destination
+            cameraPositionState.animate(
+                CameraUpdateFactory.newLatLngZoom(dest, 14f)
+            )
         }
     }
+
+    val context = LocalContext.current
+    val autocompleteLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+        onResult = { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                result.data?.let { intent ->
+                    val place = Autocomplete.getPlaceFromIntent(intent)
+                    place.latLng?.let { destLatLng ->
+                        viewModel.onDestinationSelected(destLatLng)
+                    }
+                }
+            }
+        }
+    )
 
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
         sheetPeekHeight = 350.dp,
         sheetContent = {
-            CommuterBottomSheetContent()
+            CommuterBottomSheetContent(
+                onSearchClick = {
+                    val intent = Autocomplete.IntentBuilder(
+                        AutocompleteActivityMode.OVERLAY,
+                        listOf(Place.Field.ID, Place.Field.NAME, Place.Field.LAT_LNG)
+                    ).build(context)
+                    autocompleteLauncher.launch(intent)
+                }
+            )
         },
         sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) { innerPadding ->
@@ -94,13 +131,57 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 cameraPositionState = cameraPositionState,
                 contentPadding = innerPadding // Let the map handle sheet padding
             ) {
-                // Draw all routes from Supabase
-                routes.forEach { route ->
-                    Polyline(
-                        points = route.pathCoordinates.map { it.toLatLng() },
-                        color = Color.Blue,
-                        width = 12f
-                    )
+                when (val state = navigationState) {
+                    is NavigationState.Idle -> {
+                        // Draw all routes from Supabase when idle
+                        routes.forEach { route ->
+                            Polyline(
+                                points = route.pathCoordinates.map { it.toLatLng() },
+                                color = Color.LightGray,
+                                width = 12f
+                            )
+                        }
+                    }
+                    is NavigationState.Navigating -> {
+                        // Draw the walking path to pickup
+                        if (state.walkToPickupPath != null) {
+                            Polyline(
+                                points = state.walkToPickupPath,
+                                color = Color.DarkGray,
+                                width = 12f,
+                                pattern = listOf(Dot(), Gap(20f))
+                            )
+                        }
+
+                        // Draw the specific route segment
+                        Polyline(
+                            points = state.ridePath,
+                            color = Color.Blue,
+                            width = 16f
+                        )
+                        
+                        // Draw the walking path to destination
+                        if (state.walkToDestinationPath != null) {
+                            Polyline(
+                                points = state.walkToDestinationPath,
+                                color = Color.DarkGray,
+                                width = 12f,
+                                pattern = listOf(Dot(), Gap(20f))
+                            )
+                        }
+                        
+                        // Draw Origin and Destination Markers
+                        Marker(
+                            state = MarkerState(position = state.origin),
+                            title = "Origin (USTP)",
+                            snippet = "Walk to pickup"
+                        )
+                        Marker(
+                            state = MarkerState(position = state.destination),
+                            title = "Destination",
+                            snippet = "Walk from dropoff"
+                        )
+                    }
                 }
 
                 // Draw the simulated moving Jeepney
@@ -192,7 +273,7 @@ fun TopNavigationOverlay(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun CommuterBottomSheetContent() {
+fun CommuterBottomSheetContent(onSearchClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -204,7 +285,7 @@ fun CommuterBottomSheetContent() {
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable { /* TODO: Open Search Screen */ }
+                .clickable { onSearchClick() }
                 .padding(16.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {

@@ -1,16 +1,16 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest17093537401753219847.xml:2:13-83
-INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest17093537401753219847.xml:2:13-83
+ADDED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest478031710829529352.xml:2:13-83
+INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest478031710829529352.xml:2:13-83
 	package
-		INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest17093537401753219847.xml
+		INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest478031710829529352.xml
 	xmlns:android
-		ADDED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest17093537401753219847.xml:2:23-81
+		ADDED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest478031710829529352.xml:2:23-81
 uses-sdk
-INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest17093537401753219847.xml reason: use-sdk injection requested
-INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest17093537401753219847.xml
-INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest17093537401753219847.xml
+INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest478031710829529352.xml reason: use-sdk injection requested
+INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest478031710829529352.xml
+INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest478031710829529352.xml
 	android:targetSdkVersion
-		INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest17093537401753219847.xml
+		INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest478031710829529352.xml
 	android:minSdkVersion
-		INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest17093537401753219847.xml
+		INJECTED from /home/aguynamedkent/projs/ByaHero/core/ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest478031710829529352.xml

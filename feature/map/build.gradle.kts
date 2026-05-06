@@ -60,4 +60,5 @@ dependencies {
     // Maps
     implementation(libs.google.maps.compose)
     implementation(libs.play.services.maps)
+    implementation(libs.google.places)
 }

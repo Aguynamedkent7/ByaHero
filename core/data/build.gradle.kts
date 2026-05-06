@@ -23,6 +23,7 @@ android {
 
         buildConfigField("String", "SUPABASE_URL", "\"${localProperties.getProperty("SUPABASE_URL") ?: ""}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProperties.getProperty("SUPABASE_ANON_KEY") ?: ""}\"")
+        buildConfigField("String", "MAPS_API_KEY", "\"${localProperties.getProperty("MAPS_API_KEY") ?: ""}\"")
     }
 
     buildFeatures {
@@ -59,10 +60,15 @@ dependencies {
     implementation(libs.supabase.realtime)
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.serialization.kotlinx.json)
     
     // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+
+    // Maps
+    implementation(libs.play.services.maps)
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

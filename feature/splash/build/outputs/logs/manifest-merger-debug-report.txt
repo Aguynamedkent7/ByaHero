@@ -1,16 +1,16 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest14341843584027715985.xml:2:13-83
-INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest14341843584027715985.xml:2:13-83
+ADDED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest5558391518245486508.xml:2:13-83
+INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest5558391518245486508.xml:2:13-83
 	package
-		INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest14341843584027715985.xml
+		INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest5558391518245486508.xml
 	xmlns:android
-		ADDED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest14341843584027715985.xml:2:23-81
+		ADDED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest5558391518245486508.xml:2:23-81
 uses-sdk
-INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest14341843584027715985.xml reason: use-sdk injection requested
-INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest14341843584027715985.xml
-INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest14341843584027715985.xml
+INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest5558391518245486508.xml reason: use-sdk injection requested
+INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest5558391518245486508.xml
+INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest5558391518245486508.xml
 	android:targetSdkVersion
-		INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest14341843584027715985.xml
+		INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest5558391518245486508.xml
 	android:minSdkVersion
-		INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest14341843584027715985.xml
+		INJECTED from /home/aguynamedkent/projs/ByaHero/feature/splash/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest5558391518245486508.xml
