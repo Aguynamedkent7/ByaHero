@@ -11,7 +11,6 @@ import com.example.byahero.core.data.repository.WalkingPath
 import com.google.android.gms.maps.model.LatLng
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,7 +34,8 @@ sealed class NavigationState {
         val walkDistanceText: String = "",
         val rideDistanceText: String = "",
         val selectedJeep: JeepneyInstance? = null,
-        val journeyState: JourneyState = JourneyState.WalkingToPickup
+        val journeyState: JourneyState = JourneyState.WalkingToPickup,
+        val isJeepNear: Boolean = false
     ) : NavigationState()
 }
 
@@ -239,42 +239,28 @@ class MapViewModel @Inject constructor(
             _isLoading.value = false
         }
     }
-fun showJeepSelection(option: NavigationOption, origin: LatLng, destination: LatLng) {
-    val pickupPoint = option.walkToPickupPath.last()
 
-    // Find the index of the pickup point on the route path
-    val pickupIdx = findNearestPointIndex(pickupPoint, option.ridePath)
+    fun showJeepSelection(option: NavigationOption, origin: LatLng, destination: LatLng) {
+        val pickupPoint = option.walkToPickupPath.last()
+        val pickupIdx = findNearestPointIndex(pickupPoint, option.ridePath)
 
-    val relevantJeeps = _simulatedJeepneys.value
-        .filter { it.routeCode == option.routeCode }
-        .map { jeep ->
-            val jeepIdx = findNearestPointIndex(jeep.currentLocation, option.ridePath)
-
-            // Directional Distance: jeep must be 'behind' the pickup point in the loop
-            val dist = if (jeepIdx <= pickupIdx) {
-                calculatePathDistance(option.ridePath.subList(jeepIdx, pickupIdx + 1))
-            } else {
-                // Jeep is past the pickup point, must loop around
-                calculatePathDistance(option.ridePath.subList(jeepIdx, option.ridePath.size)) + 
-                calculatePathDistance(option.ridePath.subList(0, pickupIdx + 1))
+        val relevantJeeps = _simulatedJeepneys.value
+            .filter { it.routeCode == option.routeCode }
+            .map { jeep ->
+                val jeepIdx = findNearestPointIndex(jeep.currentLocation, option.ridePath)
+                val dist = if (jeepIdx <= pickupIdx) {
+                    calculatePathDistance(option.ridePath.subList(jeepIdx, pickupIdx + 1))
+                } else {
+                    calculatePathDistance(option.ridePath.subList(jeepIdx, option.ridePath.size)) + 
+                    calculatePathDistance(option.ridePath.subList(0, pickupIdx + 1))
+                }
+                val eta = (dist / 250).toInt()
+                jeep.copy(etaMinutes = eta)
             }
+            .sortedBy { it.etaMinutes }
 
-            val eta = (dist / 250).toInt().coerceAtLeast(1)
-            jeep.copy(etaMinutes = eta)
-        }
-        .sortedBy { it.etaMinutes }
-
-    _navigationState.value = NavigationState.SelectingJeep(option, origin, destination, relevantJeeps)
-}
-
-private fun calculatePathDistance(path: List<LatLng>): Float {
-    var dist = 0f
-    for (i in 0 until path.size - 1) {
-        dist += calculateDistance(path[i], path[i + 1])
+        _navigationState.value = NavigationState.SelectingJeep(option, origin, destination, relevantJeeps)
     }
-    return dist
-}
-
 
     fun selectJeep(jeep: JeepneyInstance, state: NavigationState.SelectingJeep) {
         val navState = NavigationState.Navigating(
@@ -301,27 +287,38 @@ private fun calculatePathDistance(path: List<LatLng>): Float {
                 if (jeep != null) {
                     val pickupLoc = currentNav.walkToPickupPath?.last() ?: currentNav.ridePath.first()
                     val dropoffLoc = currentNav.walkToDestinationPath?.first() ?: currentNav.ridePath.last()
+                    val jeepIdx = findNearestPointIndex(jeep.currentLocation, currentNav.ridePath)
+                    val pickupIdx = findNearestPointIndex(pickupLoc, currentNav.ridePath)
+                    val dropoffIdx = findNearestPointIndex(dropoffLoc, currentNav.ridePath)
+                    
+                    val isPastPickup = jeepIdx > pickupIdx
+                    val distToPickup = calculateDistance(jeep.currentLocation, pickupLoc)
+                    val isJeepNear = distToPickup < 500f // 500m threshold
+
+                    var nextState = currentNav.copy(isJeepNear = isJeepNear)
 
                     when (currentNav.journeyState) {
-                        JourneyState.WalkingToPickup -> {
-                            if (calculateDistance(_userLocation.value ?: currentNav.origin, pickupLoc) < 30f) {
-                                _navigationState.value = currentNav.copy(journeyState = JourneyState.WaitingForJeep)
+                        JourneyState.WalkingToPickup, JourneyState.WaitingForJeep -> {
+                            if (isPastPickup) {
+                                _error.value = "You missed the jeep!"
+                                _navigationState.value = NavigationState.Idle
+                                return@launch
                             }
-                        }
-                        JourneyState.WaitingForJeep -> {
-                            if (calculateDistance(jeep.currentLocation, pickupLoc) < 20f) {
-                                // Jeep has arrived
+                            if (currentNav.journeyState == JourneyState.WalkingToPickup && calculateDistance(_userLocation.value ?: currentNav.origin, pickupLoc) < 30f) {
+                                nextState = nextState.copy(journeyState = JourneyState.WaitingForJeep)
                             }
                         }
                         JourneyState.Onboard -> {
-                            if (calculateDistance(jeep.currentLocation, dropoffLoc) < 100f) {
-                                _navigationState.value = currentNav.copy(journeyState = JourneyState.ApproachingDropoff)
+                            val distToDropoff = calculatePathDistance(currentNav.ridePath.subList(jeepIdx, dropoffIdx + 1))
+                            if (distToDropoff < 100f) {
+                                nextState = nextState.copy(journeyState = JourneyState.ApproachingDropoff)
                             }
                         }
                         else -> {}
                     }
+                    _navigationState.value = nextState
                 }
-                delay(2000)
+                delay(1000)
             }
         }
     }
@@ -340,19 +337,6 @@ private fun calculatePathDistance(path: List<LatLng>): Float {
         return if (this.size >= 2) {
             if (this[0] > 90.0) LatLng(this[1], this[0]) else LatLng(this[0], this[1])
         } else LatLng(0.0, 0.0)
-    }
-
-    private fun findNearestPointIndex(point: LatLng, path: List<LatLng>): Int {
-        var minDistance = Float.MAX_VALUE
-        var nearestIndex = 0
-        for (i in path.indices) {
-            val distance = calculateDistance(point, path[i])
-            if (distance < minDistance) {
-                minDistance = distance
-                nearestIndex = i
-            }
-        }
-        return nearestIndex
     }
 
     private fun findFirstPointOnRoute(walkPath: List<LatLng>, routePath: List<LatLng>): Pair<ProjectedPoint, List<LatLng>>? {
@@ -378,6 +362,27 @@ private fun calculatePathDistance(path: List<LatLng>): Float {
             dist += calculateDistance(path[i], path[i+1])
         }
         return dist.toInt()
+    }
+
+    private fun calculatePathDistance(path: List<LatLng>): Float {
+        var dist = 0f
+        for (i in 0 until path.size - 1) {
+            dist += calculateDistance(path[i], path[i + 1])
+        }
+        return dist
+    }
+
+    private fun findNearestPointIndex(point: LatLng, path: List<LatLng>): Int {
+        var minDistance = Float.MAX_VALUE
+        var nearestIndex = 0
+        for (i in path.indices) {
+            val distance = calculateDistance(point, path[i])
+            if (distance < minDistance) {
+                minDistance = distance
+                nearestIndex = i
+            }
+        }
+        return nearestIndex
     }
 
     private fun findTopCandidatePoints(target: LatLng, polyline: List<LatLng>, count: Int): List<ProjectedPoint> {
@@ -465,6 +470,8 @@ private fun calculatePathDistance(path: List<LatLng>): Float {
 
     private fun startMultiJeepSimulation(routeCode: String, path: List<LatLng>) {
         if (path.isEmpty()) return
+        val loopDurationMs = 300_000L
+        val segmentDurationMs = loopDurationMs / path.size
         val jeepConfigs = listOf(
             Pair("J1", 0),
             Pair("J2", (path.size * 0.25).toInt()),
@@ -478,18 +485,16 @@ private fun calculatePathDistance(path: List<LatLng>): Float {
                     val startPoint = path[currentIndex]
                     val nextIndex = (currentIndex + 1) % path.size
                     val endPoint = path[nextIndex]
-                    val animationDurationMs = 3000f
                     val frameRateMs = 32f
                     var elapsedTime = 0f
-                    while (elapsedTime < animationDurationMs) {
-                        val fraction = elapsedTime / animationDurationMs
+                    while (elapsedTime < segmentDurationMs) {
+                        val fraction = elapsedTime / segmentDurationMs.toFloat()
                         updateJeepLocation(id, routeCode, interpolate(fraction, startPoint, endPoint))
                         delay(frameRateMs.toLong())
                         elapsedTime += frameRateMs
                     }
                     updateJeepLocation(id, routeCode, endPoint)
                     currentIndex = nextIndex
-                    delay(500)
                 }
             }
         }

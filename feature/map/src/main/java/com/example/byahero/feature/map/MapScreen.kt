@@ -228,7 +228,7 @@ fun CommuterBottomSheetContent(
                                 Spacer(Modifier.width(16.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text("Jeepney ${jeep.id}", style = MaterialTheme.typography.titleMedium)
-                                    Text("${jeep.etaMinutes} mins away", style = MaterialTheme.typography.bodyMedium)
+                                    Text("${if (jeep.etaMinutes < 1) "Less than 1" else jeep.etaMinutes} mins away", style = MaterialTheme.typography.bodyMedium)
                                 }
                                 if (isRecommended) {
                                     SuggestionChip(onClick = {}, label = { Text("Fastest") }, enabled = false)
@@ -239,18 +239,27 @@ fun CommuterBottomSheetContent(
                 }
             }
             is NavigationState.Navigating -> {
-                androidx.compose.animation.AnimatedVisibility(navigationState.journeyState != JourneyState.Onboard) {
-                    Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                // Toast-like notification for journey updates
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = navigationState.isJeepNear || navigationState.journeyState != JourneyState.Onboard,
+                    enter = androidx.compose.animation.fadeIn(),
+                    exit = androidx.compose.animation.fadeOut()
+                ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    ) {
                         Text(
-                            text = when (navigationState.journeyState) {
-                                JourneyState.WalkingToPickup -> "Walk to boarding point"
-                                JourneyState.WaitingForJeep -> "Jeepney is nearby!"
-                                JourneyState.ApproachingDropoff -> "Approaching Dropoff!"
-                                else -> ""
+                            text = when {
+                                navigationState.isJeepNear && navigationState.journeyState == JourneyState.WalkingToPickup -> "Jeepney is approaching!"
+                                navigationState.journeyState == JourneyState.WaitingForJeep -> "Jeepney is nearby, get ready!"
+                                navigationState.journeyState == JourneyState.ApproachingDropoff -> "Approaching Dropoff!"
+                                else -> "Walk to boarding point"
                             },
                             modifier = Modifier.padding(16.dp),
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }
