@@ -26,11 +26,11 @@ class LoginViewModel @Inject constructor(
         _uiState.value = AuthUiState.Idle
     }
 
-    fun signIn(email: String, password: String) {
+    fun signIn(usernameOrEmail: String, password: String) {
         viewModelScope.launch {
             _uiState.value = AuthUiState.Loading
             try {
-                authRepository.signIn(email, password)
+                authRepository.signIn(usernameOrEmail, password)
                 _uiState.value = AuthUiState.Success
             } catch (e: Exception) {
                 _uiState.value = AuthUiState.Error(e.message ?: "Login failed")

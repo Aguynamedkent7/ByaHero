@@ -17,7 +17,7 @@ fun LoginScreen(
     val uiState by viewModel.uiState.collectAsState()
     val isSignUpMode by viewModel.isSignUpMode.collectAsState()
     
-    var email by remember { mutableStateOf("") }
+    var loginId by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var fullName by remember { mutableStateOf("") }
     var selectedRole by remember { mutableStateOf("commuter") }
@@ -76,9 +76,9 @@ fun LoginScreen(
         }
         
         OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text("Email") },
+            value = loginId,
+            onValueChange = { loginId = it },
+            label = { Text(if (isSignUpMode) "Email" else "Username or Email") },
             modifier = Modifier.fillMaxWidth()
         )
         
@@ -97,9 +97,9 @@ fun LoginScreen(
         Button(
             onClick = { 
                 if (isSignUpMode) {
-                    viewModel.signUp(email, password, fullName, selectedRole)
+                    viewModel.signUp(loginId, password, fullName, selectedRole)
                 } else {
-                    viewModel.signIn(email, password)
+                    viewModel.signIn(loginId, password)
                 }
             },
             modifier = Modifier.fillMaxWidth(),

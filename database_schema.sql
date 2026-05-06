@@ -5,6 +5,7 @@ CREATE TABLE profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   username TEXT UNIQUE,
+  email TEXT UNIQUE,
   full_name TEXT,
   avatar_url TEXT,
   role TEXT DEFAULT 'commuter' CHECK (role IN ('commuter', 'driver')),

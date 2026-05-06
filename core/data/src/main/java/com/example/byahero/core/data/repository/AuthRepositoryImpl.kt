@@ -7,6 +7,10 @@ import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
+
+@Serializable
+private data class ProfileEmail(val email: String)
 
 class AuthRepositoryImpl : AuthRepository {
     
@@ -25,19 +29,34 @@ class AuthRepositoryImpl : AuthRepository {
         
         // After signup, create the profile entry
         val user = auth.currentUserOrNull() ?: throw Exception("Signup failed")
+        val extractedUsername = email.substringBefore("@")
         
         db["profiles"].insert(
             mapOf(
                 "id" to user.id,
+                "username" to extractedUsername,
+                "email" to email,
                 "full_name" to fullName,
                 "role" to role
             )
         )
     }
 
-    override suspend fun signIn(email: String, password: String) {
+    override suspend fun signIn(usernameOrEmail: String, password: String) {
+        val actualEmail = if (usernameOrEmail.contains("@")) {
+            usernameOrEmail
+        } else {
+            val profile = db["profiles"].select {
+                filter {
+                    eq("username", usernameOrEmail)
+                }
+            }.decodeSingleOrNull<ProfileEmail>()
+            
+            profile?.email ?: throw Exception("Username not found")
+        }
+
         auth.signInWith(Email) {
-            this.email = email
+            this.email = actualEmail
             this.password = password
         }
     }

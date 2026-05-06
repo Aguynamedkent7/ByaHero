@@ -56,6 +56,6 @@ The project will follow a **Feature-based Multi-module** structure:
 ters and Drivers using Supabase Realtime.
 - [ ] **UI/UX:** Build a consistent design system in `:core:ui`.
 - [ ] **Performance:** Implement Baseline Profiles and R8 configurations.
-- [ ] **qol:** extract username from email.
-- [ ] **qol:** allow username or email when logging in .
+- [x] **qol:** extract username from email.
+- [x] **qol:** allow username or email when logging in .
 - [ ] **logic:** Only Show routes when pressed or recommended after searching where to go.
