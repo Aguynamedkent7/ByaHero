@@ -2,6 +2,8 @@ package com.example.byahero.core.data.di
 
 import com.example.byahero.core.data.repository.AuthRepository
 import com.example.byahero.core.data.repository.AuthRepositoryImpl
+import com.example.byahero.core.data.repository.RouteRepository
+import com.example.byahero.core.data.repository.RouteRepositoryImpl
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -16,5 +18,11 @@ object DataModule {
     @Singleton
     fun provideAuthRepository(): AuthRepository {
         return AuthRepositoryImpl()
+    }
+
+    @Provides
+    @Singleton
+    fun provideRouteRepository(): RouteRepository {
+        return RouteRepositoryImpl()
     }
 }

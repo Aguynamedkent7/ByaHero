@@ -2,6 +2,7 @@ package com.example.byahero.feature.map
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.byahero.core.data.repository.RouteRepository
 import com.google.android.gms.maps.model.LatLng
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -12,44 +13,83 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
-class MapViewModel @Inject constructor() : ViewModel() {
+class MapViewModel @Inject constructor(
+    private val routeRepository: RouteRepository
+) : ViewModel() {
 
-    // Dummy Lapasan Jeepney Route
-    val lapasanRoute = listOf(
-        LatLng(8.4815, 124.6465), // Near Ayala Centrio
-        LatLng(8.4810, 124.6515), // Limketkai area
-        LatLng(8.4845, 124.6565), // Passing USTP
-        LatLng(8.4860, 124.6590), // Puregold Lapasan
-        LatLng(8.4900, 124.6620)  // Agora Terminal
-    )
+    private val _routes = MutableStateFlow<List<com.example.byahero.core.data.model.Route>>(emptyList())
+    val routes: StateFlow<List<com.example.byahero.core.data.model.Route>> = _routes.asStateFlow()
 
-    private val _simulatedJeepneyLocation = MutableStateFlow(lapasanRoute.first())
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    private val _simulatedJeepneyLocation = MutableStateFlow(LatLng(8.4847, 124.6566))
     val simulatedJeepneyLocation: StateFlow<LatLng> = _simulatedJeepneyLocation.asStateFlow()
 
     init {
-        startSmoothSimulation()
+        loadRoutes()
     }
 
-    private fun startSmoothSimulation() {
+    private fun loadRoutes() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
+            try {
+                val fetchedRoutes = routeRepository.getRoutes()
+                _routes.value = fetchedRoutes
+                
+                // Start simulation for the new route
+                val routeToSimulate = fetchedRoutes.find { it.code == "RC" } ?: fetchedRoutes.firstOrNull()
+                routeToSimulate?.let { route ->
+                    val path = route.pathCoordinates.map { it.toLatLng() }
+                    startSmoothSimulation(path)
+                }
+            } catch (e: Exception) {
+                _error.value = e.message ?: "Failed to load routes"
+                e.printStackTrace()
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    private fun List<Double>.toLatLng(): LatLng {
+        return if (this.size >= 2) {
+            // Robust check: CDO is at Lat ~8, Lng ~124.
+            // If the first value is > 90, it's definitely Longitude.
+            if (this[0] > 90.0) {
+                LatLng(this[1], this[0]) // Swap [lng, lat] to [lat, lng]
+            } else {
+                LatLng(this[0], this[1]) // Already [lat, lng]
+            }
+        } else {
+            LatLng(0.0, 0.0)
+        }
+    }
+
+    private fun startSmoothSimulation(route: List<LatLng>) {
+        if (route.isEmpty()) return
+        
         viewModelScope.launch {
             var currentIndex = 0
             
             while (true) {
-                val startPoint = lapasanRoute[currentIndex]
-                val nextIndex = (currentIndex + 1) % lapasanRoute.size
-                val endPoint = lapasanRoute[nextIndex]
+                val startPoint = route[currentIndex]
+                val nextIndex = (currentIndex + 1) % route.size
+                val endPoint = route[nextIndex]
 
-                // If it loops back to start, don't animate the jump across the map
                 if (nextIndex == 0) {
                     _simulatedJeepneyLocation.value = endPoint
                     currentIndex = nextIndex
-                    delay(1000) // brief pause at the terminal
+                    delay(1000)
                     continue
                 }
 
-                // Smoothly interpolate between startPoint and endPoint over ~3 seconds
                 val animationDurationMs = 3000f
-                val frameRateMs = 16f // ~60 FPS
+                val frameRateMs = 16f
                 var elapsedTime = 0f
 
                 while (elapsedTime < animationDurationMs) {
@@ -60,13 +100,8 @@ class MapViewModel @Inject constructor() : ViewModel() {
                     elapsedTime += frameRateMs
                 }
 
-                // Ensure we end exactly on the target point
                 _simulatedJeepneyLocation.value = endPoint
-                
-                // Move to the next segment
                 currentIndex = nextIndex
-                
-                // Brief pause at each "stop"
                 delay(500)
             }
         }

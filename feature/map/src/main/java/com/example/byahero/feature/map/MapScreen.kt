@@ -33,6 +33,9 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 
+import androidx.compose.runtime.LaunchedEffect
+import com.google.android.gms.maps.CameraUpdateFactory
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
@@ -42,13 +45,36 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
         )
     )
 
-    // Observe the animated jeepney location from the ViewModel
+    // Observe state from ViewModel
     val jeepneyLocation by viewModel.simulatedJeepneyLocation.collectAsState()
+    val routes by viewModel.routes.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
 
-    // USTP CDO Coordinates
+    // USTP CDO Coordinates as default
     val ustpLocation = LatLng(8.4847, 124.6566)
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(ustpLocation, 15f)
+    }
+
+    // Helper to convert [lat, lng] or [lng, lat] to LatLng
+    fun List<Double>.toLatLng(): LatLng {
+        return if (this.size >= 2) {
+            if (this[0] > 90.0) LatLng(this[1], this[0]) else LatLng(this[0], this[1])
+        } else LatLng(0.0, 0.0)
+    }
+
+    // Move camera when routes are loaded
+    LaunchedEffect(routes) {
+        if (routes.isNotEmpty()) {
+            val firstRoute = routes.first()
+            val firstPoint = firstRoute.pathCoordinates.firstOrNull()?.toLatLng()
+            if (firstPoint != null) {
+                cameraPositionState.animate(
+                    CameraUpdateFactory.newLatLngZoom(firstPoint, 14f)
+                )
+            }
+        }
     }
 
     BottomSheetScaffold(
@@ -62,25 +88,47 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
         ) {
             GoogleMap(
                 modifier = Modifier.fillMaxSize(),
-                cameraPositionState = cameraPositionState
+                cameraPositionState = cameraPositionState,
+                contentPadding = innerPadding // Let the map handle sheet padding
             ) {
-                // Draw the static Route
-                Polyline(
-                    points = viewModel.lapasanRoute,
-                    color = Color.Blue,
-                    width = 12f
-                )
+                // Draw all routes from Supabase
+                routes.forEach { route ->
+                    Polyline(
+                        points = route.pathCoordinates.map { it.toLatLng() },
+                        color = Color.Blue,
+                        width = 12f
+                    )
+                }
 
                 // Draw the simulated moving Jeepney
                 Marker(
                     state = MarkerState(position = jeepneyLocation),
-                    title = "Lapasan Jeepney",
+                    title = "Jeepney",
                     snippet = "On Route"
                 )
+            }
+
+            // Error/Loading Overlays
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            }
+            
+            error?.let {
+                Card(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 400.dp, start = 16.dp, end = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                ) {
+                    Text(
+                        text = it,
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
             }
 
             // Top Navigation Overlay (Angkas Style)
