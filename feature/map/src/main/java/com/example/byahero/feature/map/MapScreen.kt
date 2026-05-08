@@ -34,6 +34,7 @@ import com.google.android.libraries.places.api.model.Place
 import com.google.android.libraries.places.widget.Autocomplete
 import com.google.android.libraries.places.widget.model.AutocompleteActivityMode
 import com.google.maps.android.compose.*
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +51,7 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
     val navigationState by viewModel.navigationState.collectAsState()
     val userLocation by viewModel.userLocation.collectAsState()
     val isSharingLocation by viewModel.isSharingLocation.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
@@ -75,20 +77,6 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
         }
     }
 
-    val autocompleteLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult(),
-        onResult = { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                result.data?.let { intent ->
-                    val place = Autocomplete.getPlaceFromIntent(intent)
-                    place.latLng?.let { dest ->
-                        viewModel.onDestinationSelected(dest, cameraPositionState.position.target)
-                    }
-                }
-            }
-        }
-    )
-
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
         sheetPeekHeight = 350.dp,
@@ -99,10 +87,9 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 onToggleSharing = { viewModel.toggleLocationSharing() },
                 onCancelNavigation = { viewModel.cancelNavigation() },
                 onBoardJeep = { viewModel.confirmBoarded() },
-                onSearchClick = {
-                    val intent = Autocomplete.IntentBuilder(AutocompleteActivityMode.OVERLAY, listOf(Place.Field.ID, Place.Field.NAME, Place.Field.LAT_LNG)).build(context)
-                    autocompleteLauncher.launch(intent)
-                },
+                onSearchClick = { viewModel.startSearching() },
+                onSearchQueryChange = { viewModel.updateSearchQuery(it) },
+                onPredictionSelected = { viewModel.selectPrediction(it) },
                 onRouteSelected = { option ->
                     val dest = (navigationState as? NavigationState.SelectingRoute)?.destination ?: cameraPositionState.position.target
                     viewModel.selectRoute(option, viewModel.userLocation.value ?: LatLng(8.4847, 124.6566), dest)
@@ -110,6 +97,11 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 onJeepSelected = { jeep ->
                     if (navigationState is NavigationState.SelectingJeep) {
                         viewModel.selectJeep(jeep, navigationState as NavigationState.SelectingJeep)
+                    }
+                },
+                onJeepPreview = { jeep ->
+                    coroutineScope.launch {
+                        cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(jeep.currentLocation, 16f))
                     }
                 }
             )
@@ -134,6 +126,12 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                         if (state.walkToPickupPath != null) Polyline(points = state.walkToPickupPath, color = Color.DarkGray, width = 12f, pattern = listOf(Dot(), Gap(20f)))
                         Polyline(points = state.ridePath, color = Color.Blue, width = 16f)
                         if (state.walkToDestinationPath != null) Polyline(points = state.walkToDestinationPath, color = Color.DarkGray, width = 12f, pattern = listOf(Dot(), Gap(20f)))
+                        
+                        // New: Show path from Jeep to Pickup
+                        if (state.jeepToPickupPath != null) {
+                            Polyline(points = state.jeepToPickupPath, color = Color.Magenta, width = 14f, pattern = listOf(Dot(), Gap(10f)))
+                        }
+
                         Marker(MarkerState(position = state.walkToPickupPath?.last() ?: state.ridePath.first()), title = "Board here")
                         Marker(MarkerState(position = state.walkToDestinationPath?.first() ?: state.ridePath.last()), title = "Drop off here")
                     }
@@ -173,8 +171,11 @@ fun CommuterBottomSheetContent(
     onCancelNavigation: () -> Unit,
     onBoardJeep: () -> Unit,
     onSearchClick: () -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onPredictionSelected: (com.example.byahero.core.data.repository.PlacePrediction) -> Unit,
     onRouteSelected: (NavigationOption) -> Unit,
-    onJeepSelected: (JeepneyInstance) -> Unit
+    onJeepSelected: (JeepneyInstance) -> Unit,
+    onJeepPreview: (JeepneyInstance) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
         when (navigationState) {
@@ -192,6 +193,30 @@ fun CommuterBottomSheetContent(
                     QuickActionItem(Icons.Default.Home, "Home")
                     QuickActionItem(Icons.Default.Place, "Work")
                     QuickActionItem(Icons.Default.Favorite, "Saved")
+                }
+            }
+            is NavigationState.Searching -> {
+                OutlinedTextField(
+                    value = navigationState.query,
+                    onValueChange = onSearchQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Search destination...") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    trailingIcon = { IconButton(onClick = { onCancelNavigation() }) { Icon(Icons.Default.Close, null) } },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp)
+                )
+                Spacer(Modifier.height(16.dp))
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.heightIn(max = 400.dp)) {
+                    items(navigationState.predictions.size) { index ->
+                        val prediction = navigationState.predictions[index]
+                        Card(Modifier.fillMaxWidth().clickable { onPredictionSelected(prediction) }) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text(prediction.primaryText, style = MaterialTheme.typography.titleMedium)
+                                Text(prediction.secondaryText, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
                 }
             }
             is NavigationState.SelectingRoute -> {
@@ -218,7 +243,7 @@ fun CommuterBottomSheetContent(
                         val jeep = navigationState.jeeps[index]
                         val isRecommended = index == 0
                         Card(
-                            Modifier.fillMaxWidth().clickable { onJeepSelected(jeep) },
+                            Modifier.fillMaxWidth().clickable { onJeepPreview(jeep) },
                             colors = if (isRecommended) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer) else CardDefaults.cardColors()
                         ) {
                             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -230,8 +255,8 @@ fun CommuterBottomSheetContent(
                                     Text("Jeepney ${jeep.id}", style = MaterialTheme.typography.titleMedium)
                                     Text("${if (jeep.etaMinutes < 1) "Less than 1" else jeep.etaMinutes} mins away", style = MaterialTheme.typography.bodyMedium)
                                 }
-                                if (isRecommended) {
-                                    SuggestionChip(onClick = {}, label = { Text("Fastest") }, enabled = false)
+                                Button(onClick = { onJeepSelected(jeep) }) {
+                                    Text("Select")
                                 }
                             }
                         }

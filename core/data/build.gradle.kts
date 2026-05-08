@@ -42,6 +42,7 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.play.services)
     
     // Supabase
     implementation(libs.supabase.postgrest)
@@ -62,6 +63,7 @@ dependencies {
     // Maps
     implementation(libs.play.services.maps)
     implementation(libs.play.services.location)
+    implementation(libs.google.places)
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

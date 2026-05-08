@@ -11,6 +11,7 @@ import com.example.byahero.core.data.repository.WalkingPath
 import com.google.android.gms.maps.model.LatLng
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,6 +24,7 @@ import kotlin.math.*
 
 sealed class NavigationState {
     object Idle : NavigationState()
+    data class Searching(val query: String = "", val predictions: List<com.example.byahero.core.data.repository.PlacePrediction> = emptyList()) : NavigationState()
     data class SelectingRoute(val destination: LatLng, val options: List<NavigationOption>) : NavigationState()
     data class SelectingJeep(val option: NavigationOption, val origin: LatLng, val destination: LatLng, val jeeps: List<JeepneyInstance>) : NavigationState()
     data class Navigating(
@@ -31,6 +33,7 @@ sealed class NavigationState {
         val walkToPickupPath: List<LatLng>? = null,
         val ridePath: List<LatLng>,
         val walkToDestinationPath: List<LatLng>? = null,
+        val jeepToPickupPath: List<LatLng>? = null, // New: Path from Jeep to User
         val walkDistanceText: String = "",
         val rideDistanceText: String = "",
         val selectedJeep: JeepneyInstance? = null,
@@ -74,10 +77,11 @@ data class ProjectedPoint(
 
 @HiltViewModel
 class MapViewModel @Inject constructor(
-    private val routeRepository: RouteRepository,
-    private val directionsRepository: DirectionsRepository,
-    private val locationRepository: LocationRepository,
-    private val authRepository: AuthRepository
+    private val routeRepository: com.example.byahero.core.data.repository.RouteRepository,
+    private val directionsRepository: com.example.byahero.core.data.repository.DirectionsRepository,
+    private val locationRepository: com.example.byahero.core.data.repository.LocationRepository,
+    private val authRepository: com.example.byahero.core.data.repository.AuthRepository,
+    private val placesRepository: com.example.byahero.core.data.repository.PlacesRepository
 ) : ViewModel() {
 
     private val _routes = MutableStateFlow<List<com.example.byahero.core.data.model.Route>>(emptyList())
@@ -101,8 +105,10 @@ class MapViewModel @Inject constructor(
     private val _simulatedJeepneys = MutableStateFlow<List<JeepneyInstance>>(emptyList())
     val simulatedJeepneys: StateFlow<List<JeepneyInstance>> = _simulatedJeepneys.asStateFlow()
 
+    private var searchJob: Job? = null
     private var currentUserId: String? = null
     private var locationJob: Job? = null
+    private var currentNavigationOption: NavigationOption? = null // Track current route for re-selection
 
     private val defaultOrigin = LatLng(8.4847, 124.6566)
 
@@ -116,6 +122,39 @@ class MapViewModel @Inject constructor(
             authRepository.currentUser.collect { user ->
                 currentUserId = user?.id
             }
+        }
+    }
+
+    fun startSearching() {
+        _navigationState.value = NavigationState.Searching()
+    }
+
+    fun updateSearchQuery(query: String) {
+        val currentState = _navigationState.value as? NavigationState.Searching ?: return
+        _navigationState.value = currentState.copy(query = query)
+        
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(300) // Debounce
+            val predictions = placesRepository.getPredictions(query)
+            // Ensure we are still in Searching state before updating
+            val currentNavState = _navigationState.value
+            if (currentNavState is NavigationState.Searching && currentNavState.query == query) {
+                _navigationState.value = currentNavState.copy(predictions = predictions)
+            }
+        }
+    }
+
+    fun selectPrediction(prediction: com.example.byahero.core.data.repository.PlacePrediction) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            val coordinates = placesRepository.getPlaceCoordinates(prediction.placeId)
+            if (coordinates != null) {
+                onDestinationSelected(coordinates)
+            } else {
+                _error.value = "Could not find coordinates for ${prediction.primaryText}"
+            }
+            _isLoading.value = false
         }
     }
 
@@ -171,44 +210,69 @@ class MapViewModel @Inject constructor(
             }
 
             val currentOrigin = _userLocation.value ?: fallbackOrigin ?: defaultOrigin
-            val options = mutableListOf<NavigationOption>()
             
-            val pickupWalkCache = mutableMapOf<LatLng, WalkingPath?>()
-            val dropoffWalkCache = mutableMapOf<LatLng, WalkingPath?>()
-
-            for (routeData in allRoutes) {
+            // 1. Identify candidate points for all routes
+            val routeCandidateMap = allRoutes.mapNotNull { routeData ->
                 val routePath = routeData.pathCoordinates.map { it.toLatLng() }
-                if (routePath.size < 2) continue
+                if (routePath.size < 2) return@mapNotNull null
+                val pickups = findTopCandidatePoints(currentOrigin, routePath, count = 2)
+                val dropoffs = findTopCandidatePoints(destination, routePath, count = 2)
+                routeData to (pickups to dropoffs)
+            }.toMap()
 
-                val pickupCandidates = findTopCandidatePoints(currentOrigin, routePath, count = 3)
-                val dropoffCandidates = findTopCandidatePoints(destination, routePath, count = 3)
+            // 2. Collect unique walking requests (Origin -> Pickup and Dropoff -> Destination)
+            data class WalkRequest(val start: LatLng, val end: LatLng)
+            val uniqueRequests = mutableSetOf<WalkRequest>()
+            routeCandidateMap.values.forEach { (pickups, dropoffs) ->
+                pickups.forEach { uniqueRequests.add(WalkRequest(currentOrigin, it.point)) }
+                dropoffs.forEach { uniqueRequests.add(WalkRequest(it.point, destination)) }
+            }
 
+            // 3. Fetch all walking directions in parallel
+            val walkPathCache = mutableMapOf<WalkRequest, WalkingPath?>()
+            val fetchJobs = uniqueRequests.map { req ->
+                async {
+                    val path = directionsRepository.getWalkingDirections(req.start, req.end)
+                    req to path
+                }
+            }
+            fetchJobs.forEach { job ->
+                val (req, path) = job.await()
+                walkPathCache[req] = path
+            }
+
+            // 4. Evaluate all combinations for each route to find the "Best Effort" option
+            val options = routeCandidateMap.mapNotNull { entry ->
+                val routeData = entry.key
+                val candidates = entry.value ?: return@mapNotNull null
+                val (pickups, dropoffs) = candidates
+                val routePath = routeData.pathCoordinates.map { it.toLatLng() }
+                
                 var bestOptionForThisRoute: NavigationOption? = null
                 var minEffortForThisRoute = Double.MAX_VALUE
 
-                for (pickup in pickupCandidates) {
-                    val walkToPickup = pickupWalkCache.getOrPut(pickup.point) {
-                        directionsRepository.getWalkingDirections(currentOrigin, pickup.point)
-                    } ?: continue
-
+                for (pickup in pickups) {
+                    val walkToReq = WalkRequest(currentOrigin, pickup.point)
+                    val walkToPickup = walkPathCache[walkToReq] ?: continue
+                    
                     val (effectivePickup, effectiveWalkPath) = findFirstPointOnRoute(walkToPickup.points, routePath) 
                         ?: Pair(pickup, walkToPickup.points)
-                    
                     val walkToDist = estimatePathDistance(effectiveWalkPath)
 
-                    for (dropoff in dropoffCandidates) {
-                        val walkFromDropoff = dropoffWalkCache.getOrPut(dropoff.point) {
-                            directionsRepository.getWalkingDirections(dropoff.point, destination)
-                        } ?: continue
+                    for (dropoff in dropoffs) {
+                        val walkFromReq = WalkRequest(dropoff.point, destination)
+                        val walkFromDropoff = walkPathCache[walkFromReq] ?: continue
 
                         val ridePath = constructRidePath(routePath, effectivePickup, dropoff)
                         val rideDist = estimatePathDistance(ridePath)
                         
-                        val speedRatio = 4.0
-                        val effortScore = (walkToDist + walkFromDropoff.distanceMeters) + (rideDist / speedRatio)
+                        // Effort Score: Walking is "heavier" than riding
+                        val walkEffort = walkToDist + walkFromDropoff.distanceMeters
+                        val rideEffort = rideDist / 5.0 // Ride is 5x easier than walk
+                        val totalEffort = walkEffort + rideEffort
                         
-                        if (effortScore < minEffortForThisRoute) {
-                            minEffortForThisRoute = effortScore
+                        if (totalEffort < minEffortForThisRoute) {
+                            minEffortForThisRoute = totalEffort
                             bestOptionForThisRoute = NavigationOption(
                                 routeName = routeData.name,
                                 routeCode = routeData.code,
@@ -221,12 +285,12 @@ class MapViewModel @Inject constructor(
                         }
                     }
                 }
-                
-                bestOptionForThisRoute?.let { options.add(it) }
+                bestOptionForThisRoute
             }
 
             if (options.isNotEmpty()) {
-                val sortedOptions = options.sortedBy { it.totalWalkMeters }
+                // Final sort: prioritize lowest walking distance, then lowest ride distance
+                val sortedOptions = options.sortedBy { it.totalWalkMeters + (it.rideMeters / 5.0) }
                 if (sortedOptions.size == 1) {
                     showJeepSelection(sortedOptions.first(), currentOrigin, destination)
                 } else {
@@ -240,19 +304,37 @@ class MapViewModel @Inject constructor(
         }
     }
 
+    private fun calculateForwardDistance(path: List<LatLng>, start: LatLng, end: LatLng): Float {
+        val startIdx = findNearestPointIndex(start, path)
+        val endIdx = findNearestPointIndex(end, path)
+        var totalDist = 0f
+        if (startIdx <= endIdx) {
+            for (i in startIdx until endIdx) {
+                totalDist += calculateDistance(path[i], path[i + 1])
+            }
+        } else {
+            for (i in startIdx until path.size - 1) {
+                totalDist += calculateDistance(path[i], path[i + 1])
+            }
+            totalDist += calculateDistance(path.last(), path.first())
+            for (i in 0 until endIdx) {
+                totalDist += calculateDistance(path[i], path[i + 1])
+            }
+        }
+        return totalDist
+    }
+
     fun showJeepSelection(option: NavigationOption, origin: LatLng, destination: LatLng) {
-        val pickupPoint = option.walkToPickupPath.last()
-        val pickupIdx = findNearestPointIndex(pickupPoint, option.ridePath)
+        val pickupPoint = option.walkToPickupPath.lastOrNull() ?: option.ridePath.first()
+        val fullRoute = _routes.value.find { it.code == option.routeCode }?.pathCoordinates?.map { it.toLatLng() } ?: emptyList()
 
         val relevantJeeps = _simulatedJeepneys.value
             .filter { it.routeCode == option.routeCode }
             .map { jeep ->
-                val jeepIdx = findNearestPointIndex(jeep.currentLocation, option.ridePath)
-                val dist = if (jeepIdx <= pickupIdx) {
-                    calculatePathDistance(option.ridePath.subList(jeepIdx, pickupIdx + 1))
+                val dist = if (fullRoute.isNotEmpty()) {
+                    calculateForwardDistance(fullRoute, jeep.currentLocation, pickupPoint)
                 } else {
-                    calculatePathDistance(option.ridePath.subList(jeepIdx, option.ridePath.size)) + 
-                    calculatePathDistance(option.ridePath.subList(0, pickupIdx + 1))
+                    calculateDistance(jeep.currentLocation, pickupPoint)
                 }
                 val eta = (dist / 250).toInt()
                 jeep.copy(etaMinutes = eta)
@@ -263,6 +345,19 @@ class MapViewModel @Inject constructor(
     }
 
     fun selectJeep(jeep: JeepneyInstance, state: NavigationState.SelectingJeep) {
+        val pickupLoc = state.option.walkToPickupPath.lastOrNull() ?: state.option.ridePath.first()
+        val fullRoute = _routes.value.find { it.code == state.option.routeCode }?.pathCoordinates?.map { it.toLatLng() } ?: emptyList()
+        
+        if (fullRoute.isNotEmpty()) {
+            val distForward = calculateForwardDistance(fullRoute, jeep.currentLocation, pickupLoc)
+            val totalRouteDist = calculatePathDistance(fullRoute)
+            if (distForward > totalRouteDist * 0.9 && calculateDistance(jeep.currentLocation, pickupLoc) > 150f) {
+                _error.value = "That jeepney has already passed your pickup point. Please select another one."
+                return
+            }
+        }
+
+        currentNavigationOption = state.option // Store the option for potential re-selection
         val navState = NavigationState.Navigating(
             origin = state.origin,
             destination = state.destination,
@@ -287,15 +382,43 @@ class MapViewModel @Inject constructor(
                 if (jeep != null) {
                     val pickupLoc = currentNav.walkToPickupPath?.last() ?: currentNav.ridePath.first()
                     val dropoffLoc = currentNav.walkToDestinationPath?.first() ?: currentNav.ridePath.last()
-                    val jeepIdx = findNearestPointIndex(jeep.currentLocation, currentNav.ridePath)
-                    val pickupIdx = findNearestPointIndex(pickupLoc, currentNav.ridePath)
-                    val dropoffIdx = findNearestPointIndex(dropoffLoc, currentNav.ridePath)
                     
-                    val isPastPickup = jeepIdx > pickupIdx
-                    val distToPickup = calculateDistance(jeep.currentLocation, pickupLoc)
-                    val isJeepNear = distToPickup < 500f // 500m threshold
+                    val jeepIdxOnRide = findNearestPointIndex(jeep.currentLocation, currentNav.ridePath)
+                    val dropoffIdxOnRide = findNearestPointIndex(dropoffLoc, currentNav.ridePath)
+                    
+                    val fullRoute = _routes.value.find { it.code == jeep.routeCode }?.pathCoordinates?.map { it.toLatLng() } ?: emptyList()
 
-                    var nextState = currentNav.copy(isJeepNear = isJeepNear)
+                    val jeepToPickup = if (currentNav.journeyState == JourneyState.WalkingToPickup || currentNav.journeyState == JourneyState.WaitingForJeep) {
+                        if (fullRoute.isNotEmpty()) {
+                            constructForwardPath(fullRoute, jeep.currentLocation, pickupLoc)
+                        } else null
+                    } else null
+                    
+                    val distToPickup = calculateDistance(jeep.currentLocation, pickupLoc)
+                    val isJeepNear = distToPickup < 500f
+                    
+                    var isPastPickup = false
+                    if (fullRoute.isNotEmpty() && (currentNav.journeyState == JourneyState.WalkingToPickup || currentNav.journeyState == JourneyState.WaitingForJeep)) {
+                        val distForward = calculateForwardDistance(fullRoute, jeep.currentLocation, pickupLoc)
+                        val totalRouteDist = calculatePathDistance(fullRoute)
+                        isPastPickup = distForward > totalRouteDist * 0.9 && distToPickup > 200f
+                    }
+
+                    if (isPastPickup) {
+                        _error.value = "You missed Jeepney ${jeep.id}. Please select another one."
+                        currentNavigationOption?.let { option ->
+                            showJeepSelection(option, currentNav.origin, currentNav.destination)
+                        } ?: run {
+                            _navigationState.value = NavigationState.Idle
+                        }
+                        return@launch
+                    }
+
+                    var nextState = currentNav.copy(
+                        isJeepNear = isJeepNear, 
+                        selectedJeep = jeep,
+                        jeepToPickupPath = jeepToPickup
+                    )
 
                     when (currentNav.journeyState) {
                         JourneyState.WalkingToPickup, JourneyState.WaitingForJeep -> {
@@ -309,7 +432,11 @@ class MapViewModel @Inject constructor(
                             }
                         }
                         JourneyState.Onboard -> {
-                            val distToDropoff = calculatePathDistance(currentNav.ridePath.subList(jeepIdx, dropoffIdx + 1))
+                            val remainingPath = if (jeepIdxOnRide < currentNav.ridePath.size) {
+                                currentNav.ridePath.subList(jeepIdxOnRide, (dropoffIdxOnRide + 1).coerceAtMost(currentNav.ridePath.size))
+                            } else emptyList()
+                            
+                            val distToDropoff = if (remainingPath.isNotEmpty()) calculatePathDistance(remainingPath) else 0f
                             if (distToDropoff < 100f) {
                                 nextState = nextState.copy(journeyState = JourneyState.ApproachingDropoff)
                             }
@@ -318,14 +445,14 @@ class MapViewModel @Inject constructor(
                     }
                     _navigationState.value = nextState
                 }
-                delay(1000)
+                delay(1500)
             }
         }
     }
 
     fun confirmBoarded() {
         (_navigationState.value as? NavigationState.Navigating)?.let {
-            _navigationState.value = it.copy(journeyState = JourneyState.Onboard)
+            _navigationState.value = it.copy(journeyState = JourneyState.Onboard, jeepToPickupPath = null)
         }
     }
 
@@ -335,17 +462,19 @@ class MapViewModel @Inject constructor(
 
     private fun List<Double>.toLatLng(): LatLng {
         return if (this.size >= 2) {
-            if (this[0] > 90.0) LatLng(this[1], this[0]) else LatLng(this[0], this[1])
+            // Standard GeoJSON is [lng, lat], but some files might be [lat, lng]
+            if (this[0] > 90.0 || this[0] < -90.0) LatLng(this[1], this[0]) else LatLng(this[0], this[1])
         } else LatLng(0.0, 0.0)
     }
 
     private fun findFirstPointOnRoute(walkPath: List<LatLng>, routePath: List<LatLng>): Pair<ProjectedPoint, List<LatLng>>? {
-        val limit = (walkPath.size * 0.9).toInt().coerceAtLeast(1)
+        val limit = (walkPath.size * 0.95).toInt().coerceAtLeast(1)
         for (i in 0 until limit) {
             val p = walkPath[i]
             for (j in 0 until routePath.size - 1) {
                 val nearest = getNearestPointOnSegment(p, routePath[j], routePath[j+1])
-                if (calculateDistance(p, nearest) < 15.0) {
+                // Check if distance is small AND it follows forward direction
+                if (calculateDistance(p, nearest) < 20.0) {
                     return Pair(
                         ProjectedPoint(nearest, j, 0f),
                         walkPath.subList(0, i + 1)
@@ -394,10 +523,6 @@ class MapViewModel @Inject constructor(
             val distance = calculateDistance(target, nearestOnSegment)
             allProjections.add(ProjectedPoint(nearestOnSegment, i, distance))
         }
-        for (i in polyline.indices) {
-            val distance = calculateDistance(target, polyline[i])
-            allProjections.add(ProjectedPoint(polyline[i], i.coerceAtMost(polyline.size - 2), distance))
-        }
         return allProjections.sortedBy { it.distance }.distinctBy { it.point }.take(count)
     }
 
@@ -419,28 +544,40 @@ class MapViewModel @Inject constructor(
         }
     }
 
+    private fun constructForwardPath(
+        fullPath: List<LatLng>,
+        startLoc: LatLng,
+        endLoc: LatLng
+    ): List<LatLng> {
+        val startIdx = findNearestPointIndex(startLoc, fullPath)
+        val endIdx = findNearestPointIndex(endLoc, fullPath)
+        val result = mutableListOf<LatLng>()
+        
+        result.add(startLoc)
+        if (startIdx <= endIdx) {
+            // Normal forward
+            for (i in startIdx + 1..endIdx) {
+                result.add(fullPath[i])
+            }
+        } else {
+            // Loop around the route
+            for (i in startIdx + 1 until fullPath.size) {
+                result.add(fullPath[i])
+            }
+            for (i in 0..endIdx) {
+                result.add(fullPath[i])
+            }
+        }
+        result.add(endLoc)
+        return result.distinct()
+    }
+
     private fun constructRidePath(
         fullPath: List<LatLng>,
         pickup: ProjectedPoint,
         dropoff: ProjectedPoint
     ): List<LatLng> {
-        val result = mutableListOf<LatLng>()
-        val startIdx = pickup.segmentIndex
-        val endIdx = dropoff.segmentIndex
-        if (startIdx <= endIdx) {
-            result.add(pickup.point)
-            for (i in startIdx + 1..endIdx) {
-                result.add(fullPath[i])
-            }
-            result.add(dropoff.point)
-        } else {
-            result.add(pickup.point)
-            for (i in startIdx downTo endIdx + 1) {
-                result.add(fullPath[i])
-            }
-            result.add(dropoff.point)
-        }
-        return result.distinct()
+        return constructForwardPath(fullPath, pickup.point, dropoff.point)
     }
 
     private fun calculateDistance(start: LatLng, end: LatLng): Float {
@@ -455,10 +592,13 @@ class MapViewModel @Inject constructor(
             try {
                 val fetchedRoutes = routeRepository.getRoutes()
                 _routes.value = fetchedRoutes
-                val routeToSimulate = fetchedRoutes.find { it.code == "RC" } ?: fetchedRoutes.firstOrNull()
-                routeToSimulate?.let { route ->
+                
+                // Simulate all routes
+                fetchedRoutes.forEach { route ->
                     val path = route.pathCoordinates.map { it.toLatLng() }
-                    startMultiJeepSimulation(route.code, path)
+                    if (path.isNotEmpty()) {
+                        startMultiJeepSimulation(route.code, path)
+                    }
                 }
             } catch (e: Exception) {
                 _error.value = "Failed to load routes"
@@ -473,10 +613,10 @@ class MapViewModel @Inject constructor(
         val loopDurationMs = 300_000L
         val segmentDurationMs = loopDurationMs / path.size
         val jeepConfigs = listOf(
-            Pair("J1", 0),
-            Pair("J2", (path.size * 0.25).toInt()),
-            Pair("J3", (path.size * 0.5).toInt()),
-            Pair("J4", (path.size * 0.75).toInt())
+            Pair("${routeCode}_J1", 0),
+            Pair("${routeCode}_J2", (path.size * 0.25).toInt()),
+            Pair("${routeCode}_J3", (path.size * 0.5).toInt()),
+            Pair("${routeCode}_J4", (path.size * 0.75).toInt())
         )
         jeepConfigs.forEach { (id, startIndex) ->
             viewModelScope.launch {
