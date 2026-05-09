@@ -11,4 +11,5 @@ interface AuthRepository {
     suspend fun signOut()
     suspend fun isUserLoggedIn(): Boolean
     fun canAutoLogin(): Boolean
+    suspend fun getUserRole(userId: String): String?
 }

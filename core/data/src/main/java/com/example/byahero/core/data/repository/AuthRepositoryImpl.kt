@@ -13,6 +13,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 private data class ProfileEmail(val email: String)
 
+@Serializable
+private data class ProfileRole(val role: String)
+
 class AuthRepositoryImpl : AuthRepository {
     
     private val auth = SupabaseConfig.client.auth
@@ -21,6 +24,19 @@ class AuthRepositoryImpl : AuthRepository {
 
     override val currentUser: Flow<UserInfo?> = auth.sessionStatus.map { 
         auth.currentUserOrNull()
+    }
+
+    override suspend fun getUserRole(userId: String): String? {
+        return try {
+            val profile = db["profiles"].select {
+                filter {
+                    eq("id", userId)
+                }
+            }.decodeSingleOrNull<ProfileRole>()
+            profile?.role
+        } catch (e: Exception) {
+            null
+        }
     }
 
     override suspend fun signUp(email: String, password: String, fullName: String, role: String) {

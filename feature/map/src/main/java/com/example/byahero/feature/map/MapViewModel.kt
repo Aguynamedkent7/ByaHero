@@ -33,12 +33,20 @@ sealed class NavigationState {
         val walkToPickupPath: List<LatLng>? = null,
         val ridePath: List<LatLng>,
         val walkToDestinationPath: List<LatLng>? = null,
-        val jeepToPickupPath: List<LatLng>? = null, // New: Path from Jeep to User
+        val jeepToPickupPath: List<LatLng>? = null,
         val walkDistanceText: String = "",
         val rideDistanceText: String = "",
         val selectedJeep: JeepneyInstance? = null,
         val journeyState: JourneyState = JourneyState.WalkingToPickup,
         val isJeepNear: Boolean = false
+    ) : NavigationState()
+    
+    // Driver States
+    object DriverIdle : NavigationState()
+    data class DriverSelectingRoute(val availableRoutes: List<com.example.byahero.core.data.model.Route>) : NavigationState()
+    data class DriverNavigating(
+        val route: com.example.byahero.core.data.model.Route,
+        val passengers: List<LatLng>
     ) : NavigationState()
 }
 
@@ -102,8 +110,14 @@ class MapViewModel @Inject constructor(
     private val _isSharingLocation = MutableStateFlow(false)
     val isSharingLocation: StateFlow<Boolean> = _isSharingLocation.asStateFlow()
 
+    private val _userRole = MutableStateFlow<String?>("commuter")
+    val userRole: StateFlow<String?> = _userRole.asStateFlow()
+
     private val _simulatedJeepneys = MutableStateFlow<List<JeepneyInstance>>(emptyList())
     val simulatedJeepneys: StateFlow<List<JeepneyInstance>> = _simulatedJeepneys.asStateFlow()
+
+    private val _driverBearing = MutableStateFlow(0f)
+    val driverBearing: StateFlow<Float> = _driverBearing.asStateFlow()
 
     private var searchJob: Job? = null
     private var currentUserId: String? = null
@@ -121,6 +135,16 @@ class MapViewModel @Inject constructor(
         viewModelScope.launch {
             authRepository.currentUser.collect { user ->
                 currentUserId = user?.id
+                if (user != null) {
+                    val role = authRepository.getUserRole(user.id)
+                    _userRole.value = role ?: "commuter"
+                    if (role == "driver") {
+                        _navigationState.value = NavigationState.DriverIdle
+                    }
+                } else {
+                    _userRole.value = "commuter"
+                    _navigationState.value = NavigationState.Idle
+                }
             }
         }
     }
@@ -196,6 +220,80 @@ class MapViewModel @Inject constructor(
 
     fun cancelNavigation() {
         _navigationState.value = NavigationState.Idle
+    }
+
+    private var driverSimulationJob: Job? = null
+
+    fun selectDriverRoute() {
+        _navigationState.value = NavigationState.DriverSelectingRoute(_routes.value)
+    }
+
+    fun startDriverTrip(route: com.example.byahero.core.data.model.Route) {
+        // Generate simulated passengers (dots) along the route
+        val path = route.pathCoordinates.map { it.toLatLng() }
+        val simulatedPassengers = mutableListOf<LatLng>()
+        if (path.size > 5) {
+            val random = java.util.Random()
+            val numPassengers = 5 + random.nextInt(6) // 5 to 10 passengers
+            for (i in 0 until numPassengers) {
+                val idx = random.nextInt(path.size - 1)
+                simulatedPassengers.add(path[idx])
+            }
+        }
+
+        _navigationState.value = NavigationState.DriverNavigating(route, simulatedPassengers)
+
+        // Cancel real location tracking for driver simulation
+        locationJob?.cancel()
+        locationJob = null
+
+        driverSimulationJob?.cancel()
+        driverSimulationJob = viewModelScope.launch {
+            if (path.isEmpty()) return@launch
+            val loopDurationMs = 300_000L // 5 mins per loop
+            val segmentDurationMs = loopDurationMs / path.size
+            var currentIndex = 0
+            
+            while (true) {
+                val startPoint = path[currentIndex]
+                val nextIndex = (currentIndex + 1) % path.size
+                val endPoint = path[nextIndex]
+                val frameRateMs = 16f // 60fps updates for ultra-smooth movement
+                var elapsedTime = 0f
+                
+                val bearing = calculateBearing(startPoint, endPoint)
+                _driverBearing.value = bearing
+                
+                while (elapsedTime < segmentDurationMs) {
+                    val fraction = elapsedTime / segmentDurationMs.toFloat()
+                    val newLoc = interpolate(fraction, startPoint, endPoint)
+                    _userLocation.value = newLoc
+                    delay(frameRateMs.toLong())
+                    elapsedTime += frameRateMs
+                }
+                _userLocation.value = endPoint
+                currentIndex = nextIndex
+            }
+        }
+    }
+
+    private fun calculateBearing(start: LatLng, end: LatLng): Float {
+        val lat1 = Math.toRadians(start.latitude)
+        val lng1 = Math.toRadians(start.longitude)
+        val lat2 = Math.toRadians(end.latitude)
+        val lng2 = Math.toRadians(end.longitude)
+
+        val y = sin(lng2 - lng1) * cos(lat2)
+        val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(lng2 - lng1)
+        return ((Math.toDegrees(atan2(y, x)) + 360) % 360).toFloat()
+    }
+
+    fun endDriverTrip() {
+        driverSimulationJob?.cancel()
+        driverSimulationJob = null
+        _navigationState.value = NavigationState.DriverIdle
+        // Resume real location tracking
+        startLocationTracking()
     }
 
     fun onDestinationSelected(destination: LatLng, fallbackOrigin: LatLng? = null) {
@@ -458,6 +556,10 @@ class MapViewModel @Inject constructor(
 
     fun selectRoute(option: NavigationOption, origin: LatLng, destination: LatLng) {
         showJeepSelection(option, origin, destination)
+    }
+
+    fun clearError() {
+        _error.value = null
     }
 
     private fun List<Double>.toLatLng(): LatLng {
