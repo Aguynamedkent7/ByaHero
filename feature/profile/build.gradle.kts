@@ -1,23 +1,18 @@
 plugins {
-    alias(libs.plugins.android.application)
+    alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
-    alias(libs.plugins.secrets.gradle.plugin)
 }
 
 android {
-    namespace = "com.example.byahero"
+    namespace = "com.example.byahero.feature.profile"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.byahero"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     buildTypes {
@@ -40,48 +35,24 @@ android {
     }
     buildFeatures {
         compose = true
-        buildConfig = true
     }
 }
 
 dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:data"))
-    implementation(project(":feature:splash"))
-    implementation(project(":feature:auth"))
-    implementation(project(":feature:map"))
-    implementation(project(":feature:profile"))
-    implementation(project(":feature:settings"))
-    
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.navigation.compose)
-    implementation(libs.google.places)
-    implementation(libs.play.services.location)
-    
-    // Hilt with KSP
+
+    // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
-    
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-    debugImplementation(libs.androidx.compose.ui.tooling)
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
 
-configurations.all {
-    resolutionStrategy {
-        force("androidx.vectordrawable:vectordrawable:1.1.0")
-        force("androidx.vectordrawable:vectordrawable-animated:1.1.0")
-    }
-}

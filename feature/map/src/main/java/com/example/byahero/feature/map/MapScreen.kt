@@ -41,7 +41,11 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
+fun MapScreen(
+    viewModel: MapViewModel = hiltViewModel(),
+    onNavigateToProfile: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {}
+) {
     val context = LocalContext.current
     val scaffoldState = rememberBottomSheetScaffoldState(
         bottomSheetState = rememberStandardBottomSheetState(initialValue = SheetValue.PartiallyExpanded)
@@ -340,7 +344,11 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                TopNavigationOverlay(userLocation)
+                TopNavigationOverlay(
+                    userLocation = userLocation,
+                    onNavigateToProfile = onNavigateToProfile,
+                    onNavigateToSettings = onNavigateToSettings
+                )
                 
                 error?.let { msg ->
                     Card(
@@ -398,9 +406,19 @@ fun JeepneyIcon(backgroundColor: Color, icon: ImageVector, isHighlighted: Boolea
 }
 
 @Composable
-fun TopNavigationOverlay(userLocation: LatLng?, modifier: Modifier = Modifier) {
+fun TopNavigationOverlay(
+    userLocation: LatLng?,
+    modifier: Modifier = Modifier,
+    onNavigateToProfile: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {}
+) {
     Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface, shadowElevation = 4.dp) { IconButton(onClick = {}) { Icon(Icons.Default.Menu, null) } }
+        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 4.dp) { 
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onNavigateToProfile) { Icon(Icons.Default.Person, contentDescription = "Profile") }
+                IconButton(onClick = onNavigateToSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
+            }
+        }
         Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 4.dp) {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.LocationOn, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))

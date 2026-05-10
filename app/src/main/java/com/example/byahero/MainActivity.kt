@@ -18,6 +18,8 @@ import com.example.byahero.core.ui.theme.ByaHeroTheme
 import com.example.byahero.feature.splash.SplashScreen
 import com.example.byahero.feature.auth.LoginScreen
 import com.example.byahero.feature.map.MapScreen
+import com.example.byahero.feature.profile.ProfileScreen
+import com.example.byahero.feature.settings.SettingsScreen
 import com.google.android.libraries.places.api.Places
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -58,7 +60,20 @@ class MainActivity : ComponentActivity() {
                         })
                     }
                     composable("home") {
-                        MapScreen()
+                        MapScreen(
+                            onNavigateToProfile = { navController.navigate("profile") },
+                            onNavigateToSettings = { navController.navigate("settings") }
+                        )
+                    }
+                    composable("profile") {
+                        ProfileScreen(
+                            onNavigateBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("settings") {
+                        SettingsScreen(
+                            onNavigateBack = { navController.popBackStack() }
+                        )
                     }
                 }
             }
