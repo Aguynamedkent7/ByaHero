@@ -1,16 +1,27 @@
 package com.example.byahero.feature.profile
 
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.byahero.core.ui.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,88 +48,124 @@ fun ProfileScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Profile") },
+                title = { Text("Profile", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Text("<")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Top
+                .padding(padding),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.logo),
-                contentDescription = "App Logo",
-                modifier = Modifier.size(120.dp)
-            )
-            
-            Spacer(modifier = Modifier.height(24.dp))
-
             if (uiState.isLoading) {
-                CircularProgressIndicator()
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
             uiState.userProfile?.let { profile ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                // Avatar
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.Start
-                    ) {
-                        Text("Personal Information", style = MaterialTheme.typography.titleLarge)
-                        Divider(modifier = Modifier.padding(vertical = 8.dp))
-                        
-                        Text("Username: ${profile.username ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
-                        Text("Email: ${profile.email ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
-                        Text("Full Name: ${profile.fullName ?: "N/A"}", style = MaterialTheme.typography.bodyLarge)
-                        Text("Role: ${profile.role?.replaceFirstChar { it.uppercase() } ?: "Commuter"}", style = MaterialTheme.typography.bodyLarge)
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Avatar",
+                        modifier = Modifier.size(60.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
                 }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Button(
-                    onClick = { 
-                        newUsername = profile.username ?: ""
-                        showEditUsernameDialog = true 
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Edit Username")
-                }
-
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = profile.fullName ?: "User",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Text(
+                    text = profile.email ?: "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
                 Spacer(modifier = Modifier.height(8.dp))
-
-                Button(
-                    onClick = { 
-                        newPassword = ""
-                        showEditPasswordDialog = true 
-                    },
-                    modifier = Modifier.fillMaxWidth()
+                
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer
                 ) {
-                    Text("Edit Password")
+                    Text(
+                        text = profile.role?.replaceFirstChar { it.uppercase() } ?: "Commuter",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
-                
-                Spacer(modifier = Modifier.height(24.dp))
-                
-                TextButton(
+
+                Spacer(modifier = Modifier.height(48.dp))
+
+                // Action List
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                ) {
+                    ProfileMenuItem(
+                        icon = Icons.Default.Edit,
+                        title = "Edit Username",
+                        subtitle = profile.username ?: "Set your username",
+                        onClick = {
+                            newUsername = profile.username ?: ""
+                            showEditUsernameDialog = true
+                        }
+                    )
+                    
+                    ProfileMenuItem(
+                        icon = Icons.Default.Lock,
+                        title = "Change Password",
+                        subtitle = "Update your security credentials",
+                        onClick = {
+                            newPassword = ""
+                            showEditPasswordDialog = true
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Logout Button
+                Button(
                     onClick = { 
                         viewModel.signOut()
                         onNavigateToLogin()
                     },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .height(56.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
-                    Text("Logout")
+                    Icon(Icons.Default.Logout, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Logout", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -133,21 +180,18 @@ fun ProfileScreen(
             onDismissRequest = { showEditUsernameDialog = false },
             title = { Text("Edit Username") },
             text = {
-                TextField(
+                OutlinedTextField(
                     value = newUsername,
                     onValueChange = { newUsername = it },
-                    label = { Text("New Username") }
+                    label = { Text("New Username") },
+                    shape = RoundedCornerShape(12.dp)
                 )
             },
             confirmButton = {
-                Button(onClick = { viewModel.updateUsername(newUsername) }) {
-                    Text("Save")
-                }
+                Button(onClick = { viewModel.updateUsername(newUsername) }) { Text("Save") }
             },
             dismissButton = {
-                TextButton(onClick = { showEditUsernameDialog = false }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showEditUsernameDialog = false }) { Text("Cancel") }
             }
         )
     }
@@ -155,25 +199,57 @@ fun ProfileScreen(
     if (showEditPasswordDialog) {
         AlertDialog(
             onDismissRequest = { showEditPasswordDialog = false },
-            title = { Text("Edit Password") },
+            title = { Text("Change Password") },
             text = {
-                TextField(
+                OutlinedTextField(
                     value = newPassword,
                     onValueChange = { newPassword = it },
                     label = { Text("New Password") },
-                    visualTransformation = PasswordVisualTransformation()
+                    visualTransformation = PasswordVisualTransformation(),
+                    shape = RoundedCornerShape(12.dp)
                 )
             },
             confirmButton = {
-                Button(onClick = { viewModel.updatePassword(newPassword) }) {
-                    Text("Save")
-                }
+                Button(onClick = { viewModel.updatePassword(newPassword) }) { Text("Save") }
             },
             dismissButton = {
-                TextButton(onClick = { showEditPasswordDialog = false }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showEditPasswordDialog = false }) { Text("Cancel") }
             }
         )
+    }
+}
+
+@Composable
+fun ProfileMenuItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = Color.Transparent
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(vertical = 16.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }

@@ -38,6 +38,7 @@ import com.google.android.libraries.places.widget.model.AutocompleteActivityMode
 import com.google.maps.android.compose.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,10 +86,12 @@ fun MapScreen(
     var lastNavigatedJeepId by remember { mutableStateOf<String?>(null) }
 
     // Detect manual movement
-    LaunchedEffect(cameraPositionState.isMoving) {
+    LaunchedEffect(cameraPositionState.isMoving, navigationState) {
         if (cameraPositionState.isMoving && cameraPositionState.cameraMoveStartedReason == CameraMoveStartedReason.GESTURE) {
-            isAutoFollowEnabled = false
-            lastManualInteractionTime = System.currentTimeMillis()
+            if (navigationState !is NavigationState.DriverNavigating) {
+                isAutoFollowEnabled = false
+                lastManualInteractionTime = System.currentTimeMillis()
+            }
         }
     }
 
@@ -108,42 +111,61 @@ fun MapScreen(
         }
     }
 
-    // Camera Logic
-    LaunchedEffect(navigationState, userLocation, isAutoFollowEnabled, driverBearing) {
+    // Camera Initial Zoom Logic
+    LaunchedEffect(navigationState) {
         val state = navigationState
+        
         if (state is NavigationState.Navigating) {
             val jeep = state.selectedJeep
             if (jeep != null) {
-                // 1. Initial zoom to destination when navigation starts
                 if (lastNavigatedJeepId != jeep.id) {
                     lastNavigatedJeepId = jeep.id
-                    isAutoFollowEnabled = true // Reset auto-follow on new navigation
-                    cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(state.destination, 14f))
+                    cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(state.destination, 15f))
                 } 
-                // 2. Continuous follow if enabled
-                else if (isAutoFollowEnabled) {
-                    cameraPositionState.animate(
-                        CameraUpdateFactory.newLatLng(jeep.currentLocation),
-                        1000
-                    )
-                }
-            }
-        } else if (state is NavigationState.DriverNavigating) {
-            if (isAutoFollowEnabled && userLocation != null) {
-                cameraPositionState.animate(
-                    CameraUpdateFactory.newCameraPosition(
-                        CameraPosition.Builder()
-                            .target(userLocation!!)
-                            .zoom(18f)
-                            .bearing(driverBearing)
-                            .tilt(60f) // 3D perspective
-                            .build()
-                    ),
-                    1000
-                )
             }
         } else {
             lastNavigatedJeepId = null
+        }
+    }
+
+    // High-frequency Camera Follow Logic
+    LaunchedEffect(isAutoFollowEnabled, navigationState) {
+        if (!isAutoFollowEnabled && navigationState !is NavigationState.DriverNavigating) return@LaunchedEffect
+
+        androidx.compose.runtime.snapshotFlow { 
+            Triple(navigationState, userLocation, driverBearing)
+        }.collect { triple ->
+            val state = triple.first
+            val loc = triple.second
+            val bearing = triple.third
+            
+            val isLocValid = loc != null && loc.latitude != 0.0 && loc.longitude != 0.0
+
+            if (state is NavigationState.DriverNavigating) {
+                if (isLocValid) {
+                    cameraPositionState.move(
+                        CameraUpdateFactory.newCameraPosition(
+                            CameraPosition.Builder()
+                                .target(loc!!)
+                                .zoom(18f)
+                                .bearing(bearing)
+                                .tilt(60f)
+                                .build()
+                        )
+                    )
+                }
+            } else if (state is NavigationState.Navigating) {
+                val jeep = state.selectedJeep
+                if (jeep != null && lastNavigatedJeepId == jeep.id) {
+                    cameraPositionState.move(
+                        CameraUpdateFactory.newLatLng(jeep.currentLocation)
+                    )
+                }
+            } else if (isLocValid) {
+                cameraPositionState.move(
+                    CameraUpdateFactory.newLatLngZoom(loc!!, 16f)
+                )
+            }
         }
     }
 
@@ -151,8 +173,10 @@ fun MapScreen(
         when (navigationState) {
             is NavigationState.Searching, 
             is NavigationState.SelectingRoute, 
-            is NavigationState.SelectingJeep -> {
+            is NavigationState.SelectingJeep,
+            is NavigationState.DriverNavigating -> {
                 scaffoldState.bottomSheetState.expand()
+                isAutoFollowEnabled = true
             }
             is NavigationState.Idle, is NavigationState.DriverIdle -> {
                 previewedJeepId = null
@@ -164,50 +188,59 @@ fun MapScreen(
 
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
-        sheetPeekHeight = if (userRole == "driver") 200.dp else 350.dp,
+        sheetPeekHeight = if (userRole == "driver") 200.dp else 140.dp,
         sheetContent = {
-            if (userRole == "driver") {
-                DriverBottomSheetContent(
-                    navigationState = navigationState,
-                    onSelectRouteClick = { viewModel.selectDriverRoute() },
-                    onRouteSelected = { route -> viewModel.startDriverTrip(route) },
-                    onEndTrip = { viewModel.endDriverTrip() }
-                )
-            } else {
-                CommuterBottomSheetContent(
-                    navigationState = navigationState,
-                    isSharingLocation = isSharingLocation,
-                    onToggleSharing = { viewModel.toggleLocationSharing() },
-                    onCancelNavigation = { viewModel.cancelNavigation() },
-                    onBoardJeep = { viewModel.confirmBoarded() },
-                    onSearchClick = { 
-                        coroutineScope.launch { scaffoldState.bottomSheetState.expand() }
-                        viewModel.startSearching() 
-                    },
-                    onSearchQueryChange = { viewModel.updateSearchQuery(it) },
-                    onPredictionSelected = { viewModel.selectPrediction(it) },
-                    onRouteSelected = { option ->
-                        val dest = (navigationState as? NavigationState.SelectingRoute)?.destination ?: cameraPositionState.position.target
-                        viewModel.selectRoute(option, viewModel.userLocation.value ?: LatLng(8.4847, 124.6566), dest)
-                    },
-                    onJeepSelected = { jeep ->
-                        if (navigationState is NavigationState.SelectingJeep) {
-                            previewedJeepId = null
-                            viewModel.selectJeep(jeep, navigationState as NavigationState.SelectingJeep)
+            Box(Modifier.fillMaxWidth().heightIn(min = 300.dp, max = 650.dp)) {
+                if (userRole == "driver") {
+                    DriverBottomSheetContent(
+                        navigationState = navigationState,
+                        onSelectRouteClick = { viewModel.selectDriverRoute() },
+                        onRouteSelected = { route -> viewModel.startDriverTrip(route) },
+                        onEndTrip = { viewModel.endDriverTrip() }
+                    )
+                } else {
+                    CommuterBottomSheetContent(
+                        navigationState = navigationState,
+                        isSharingLocation = isSharingLocation,
+                        onToggleSharing = { viewModel.toggleLocationSharing() },
+                        onCancelNavigation = { viewModel.cancelNavigation() },
+                        onBoardJeep = { viewModel.confirmBoarded() },
+                        onSearchClick = { 
+                            coroutineScope.launch { scaffoldState.bottomSheetState.expand() }
+                            viewModel.startSearching() 
+                        },
+                        onSearchQueryChange = { viewModel.updateSearchQuery(it) },
+                        onPredictionSelected = { viewModel.selectPrediction(it) },
+                        onRouteSelected = { option ->
+                            val dest = (navigationState as? NavigationState.SelectingRoute)?.destination ?: cameraPositionState.position.target
+                            viewModel.selectRoute(option, viewModel.userLocation.value ?: LatLng(8.4847, 124.6566), dest)
+                        },
+                        onJeepSelected = { jeep ->
+                            if (navigationState is NavigationState.SelectingJeep) {
+                                previewedJeepId = null
+                                viewModel.selectJeep(jeep, navigationState as NavigationState.SelectingJeep)
+                            }
+                        },
+                        onJeepPreview = { jeep ->
+                            isAutoFollowEnabled = false
+                            lastManualInteractionTime = System.currentTimeMillis()
+                            previewedJeepId = jeep.id
+                            coroutineScope.launch {
+                                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(jeep.currentLocation, 16f))
+                            }
                         }
-                    },
-                    onJeepPreview = { jeep ->
-                        isAutoFollowEnabled = false
-                        lastManualInteractionTime = System.currentTimeMillis()
-                        previewedJeepId = jeep.id
-                        coroutineScope.launch {
-                            cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(jeep.currentLocation, 16f))
-                        }
-                    }
-                )
+                    )
+                }
             }
         },
-        sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        sheetShadowElevation = 16.dp,
+        sheetDragHandle = {
+            BottomSheetDefaults.DragHandle(
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+            )
+        }
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize()) {
             GoogleMap(
@@ -217,7 +250,7 @@ fun MapScreen(
                 properties = MapProperties(
                     isMyLocationEnabled = userLocation != null && navigationState !is NavigationState.DriverNavigating
                 ),
-                uiSettings = MapUiSettings(myLocationButtonEnabled = true)
+                uiSettings = MapUiSettings(myLocationButtonEnabled = false)
             ) {
                 when (val state = navigationState) {
                     is NavigationState.Idle, is NavigationState.DriverIdle -> {
@@ -340,6 +373,22 @@ fun MapScreen(
                     Text("Follow Jeep")
                 }
             }
+            // Floating Current Location Button
+            if (navigationState !is NavigationState.DriverNavigating) {
+                FloatingActionButton(
+                    onClick = { isAutoFollowEnabled = true },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = if (navigationState is NavigationState.Idle) 160.dp else 420.dp, end = 16.dp),
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    shape = CircleShape,
+                    elevation = FloatingActionButtonDefaults.elevation(4.dp)
+                ) {
+                    Icon(Icons.Default.MyLocation, "My Location")
+                }
+            }
+
             if (isLoading) CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             
             // Top Overlays
@@ -452,20 +501,30 @@ fun CommuterBottomSheetContent(
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
         when (navigationState) {
             is NavigationState.Idle -> {
-                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant).clickable { onSearchClick() }.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Search, null)
-                        Text("Where to?", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Good day, Commuter!", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(16.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable { onSearchClick() },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Where to?", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                     }
                 }
-                Spacer(Modifier.height(24.dp))
-                Switch(isSharingLocation, { onToggleSharing() })
                 Spacer(Modifier.height(24.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     QuickActionItem(Icons.Default.Home, "Home")
                     QuickActionItem(Icons.Default.Place, "Work")
                     QuickActionItem(Icons.Default.Favorite, "Saved")
                 }
+                Spacer(Modifier.height(16.dp))
             }
             is NavigationState.Searching -> {
                 OutlinedTextField(
