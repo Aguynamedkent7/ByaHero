@@ -14,6 +14,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.example.byahero.core.data.repository.SettingsRepository
 import com.example.byahero.core.ui.theme.ByaHeroTheme
 import com.example.byahero.feature.splash.SplashScreen
 import com.example.byahero.feature.auth.LoginScreen
@@ -22,9 +25,14 @@ import com.example.byahero.feature.profile.ProfileScreen
 import com.example.byahero.feature.settings.SettingsScreen
 import com.google.android.libraries.places.api.Places
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -34,7 +42,9 @@ class MainActivity : ComponentActivity() {
         
         enableEdgeToEdge()
         setContent {
-            ByaHeroTheme {
+            val isDarkMode by settingsRepository.isDarkMode.collectAsState(initial = false)
+
+            ByaHeroTheme(darkTheme = isDarkMode) {
                 val navController = rememberNavController()
                 
                 NavHost(navController = navController, startDestination = "splash") {
@@ -67,7 +77,12 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("profile") {
                         ProfileScreen(
-                            onNavigateBack = { navController.popBackStack() }
+                            onNavigateBack = { navController.popBackStack() },
+                            onNavigateToLogin = {
+                                navController.navigate("login") {
+                                    popUpTo("home") { inclusive = true }
+                                }
+                            }
                         )
                     }
                     composable("settings") {

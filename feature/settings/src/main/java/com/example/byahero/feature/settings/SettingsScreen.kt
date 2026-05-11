@@ -4,18 +4,22 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.byahero.core.ui.R
 
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
+    val uiState by viewModel.uiState.collectAsState()
+
     Scaffold(
         topBar = {
             @OptIn(ExperimentalMaterial3Api::class)
@@ -35,39 +39,67 @@ fun SettingsScreen(
                 .padding(padding)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Top
         ) {
-            val context = LocalContext.current
-            val imageResId = context.resources.getIdentifier("logo", "drawable", context.packageName)
-            if (imageResId != 0) {
-                 Image(
-                     painter = painterResource(id = imageResId),
-                     contentDescription = "App Logo",
-                     modifier = Modifier.size(120.dp)
-                 )
-                 Spacer(modifier = Modifier.height(16.dp))
-            }
+            Image(
+                painter = painterResource(id = R.drawable.logo),
+                contentDescription = "App Logo",
+                modifier = Modifier.size(120.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
 
             Text("App Settings", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(16.dp))
             
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Enable Notifications")
-                Switch(checked = true, onCheckedChange = {})
+            SettingsToggle(
+                label = "Enable Notifications",
+                checked = uiState.isNotificationsEnabled,
+                onCheckedChange = { viewModel.setNotificationsEnabled(it) }
+            )
+
+            if (uiState.isNotificationsEnabled) {
+                Column(modifier = Modifier.padding(start = 16.dp)) {
+                    SettingsToggle(
+                        label = "Notify when Jeepney is near",
+                        checked = uiState.notifyJeepneyNear,
+                        onCheckedChange = { viewModel.setNotifyJeepneyNear(it) }
+                    )
+                    SettingsToggle(
+                        label = "Notify Jeepney distance",
+                        checked = uiState.notifyJeepneyDistance,
+                        onCheckedChange = { viewModel.setNotifyJeepneyDistance(it) }
+                    )
+                    SettingsToggle(
+                        label = "Notify stop distance",
+                        checked = uiState.notifyStopDistance,
+                        onCheckedChange = { viewModel.setNotifyStopDistance(it) }
+                    )
+                }
             }
+
             Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Dark Mode")
-                Switch(checked = false, onCheckedChange = {})
-            }
+            
+            SettingsToggle(
+                label = "Dark Mode",
+                checked = uiState.isDarkMode,
+                onCheckedChange = { viewModel.setDarkMode(it) }
+            )
         }
+    }
+}
+
+@Composable
+fun SettingsToggle(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label)
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

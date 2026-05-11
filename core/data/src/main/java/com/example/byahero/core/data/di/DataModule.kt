@@ -11,6 +11,8 @@ import com.example.byahero.core.data.repository.LocationRepository
 import com.example.byahero.core.data.repository.LocationRepositoryImpl
 import com.example.byahero.core.data.repository.PlacesRepository
 import com.example.byahero.core.data.repository.PlacesRepositoryImpl
+import com.example.byahero.core.data.repository.SettingsRepository
+import com.example.byahero.core.data.repository.SettingsRepositoryImpl
 import com.example.byahero.core.data.SupabaseConfig
 import dagger.Module
 import dagger.Provides
@@ -51,5 +53,11 @@ object DataModule {
     @Singleton
     fun providePlacesRepository(@ApplicationContext context: Context): PlacesRepository {
         return PlacesRepositoryImpl(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideSettingsRepository(): SettingsRepository {
+        return SettingsRepositoryImpl()
     }
 }

@@ -149,11 +149,14 @@ fun MapScreen(
 
     LaunchedEffect(navigationState) {
         when (navigationState) {
-            is NavigationState.Searching -> {
+            is NavigationState.Searching, 
+            is NavigationState.SelectingRoute, 
+            is NavigationState.SelectingJeep -> {
                 scaffoldState.bottomSheetState.expand()
             }
             is NavigationState.Idle, is NavigationState.DriverIdle -> {
                 previewedJeepId = null
+                scaffoldState.bottomSheetState.partialExpand()
             }
             else -> {}
         }
@@ -177,7 +180,10 @@ fun MapScreen(
                     onToggleSharing = { viewModel.toggleLocationSharing() },
                     onCancelNavigation = { viewModel.cancelNavigation() },
                     onBoardJeep = { viewModel.confirmBoarded() },
-                    onSearchClick = { viewModel.startSearching() },
+                    onSearchClick = { 
+                        coroutineScope.launch { scaffoldState.bottomSheetState.expand() }
+                        viewModel.startSearching() 
+                    },
                     onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                     onPredictionSelected = { viewModel.selectPrediction(it) },
                     onRouteSelected = { option ->

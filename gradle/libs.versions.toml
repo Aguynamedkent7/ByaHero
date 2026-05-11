@@ -26,6 +26,7 @@ hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-com
 supabase-postgrest = { module = "io.github.jan-tennert.supabase:postgrest-kt", version.ref = "supabase" }
 supabase-auth = { module = "io.github.jan-tennert.supabase:auth-kt", version.ref = "supabase" }
 supabase-realtime = { module = "io.github.jan-tennert.supabase:realtime-kt", version.ref = "supabase" }
+supabase-core = { module = "io.github.jan-tennert.supabase:supabase-kt", version.ref = "supabase" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version = "1.8.1" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }

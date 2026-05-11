@@ -45,8 +45,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.play.services)
     
     // Supabase
+    implementation(libs.supabase.core)
     implementation(libs.supabase.postgrest)
-    implementation(libs.supabase.auth)
+    api(libs.supabase.auth)
     implementation(libs.supabase.realtime)
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.core)

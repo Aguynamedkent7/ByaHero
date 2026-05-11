@@ -3,10 +3,12 @@ package com.example.byahero.feature.map
 import android.location.Location
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.byahero.core.common.notification.NotificationHelper
 import com.example.byahero.core.data.repository.AuthRepository
 import com.example.byahero.core.data.repository.DirectionsRepository
 import com.example.byahero.core.data.repository.LocationRepository
 import com.example.byahero.core.data.repository.RouteRepository
+import com.example.byahero.core.data.repository.SettingsRepository
 import com.example.byahero.core.data.repository.WalkingPath
 import com.google.android.gms.maps.model.LatLng
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.Locale
 import javax.inject.Inject
@@ -89,7 +92,9 @@ class MapViewModel @Inject constructor(
     private val directionsRepository: com.example.byahero.core.data.repository.DirectionsRepository,
     private val locationRepository: com.example.byahero.core.data.repository.LocationRepository,
     private val authRepository: com.example.byahero.core.data.repository.AuthRepository,
-    private val placesRepository: com.example.byahero.core.data.repository.PlacesRepository
+    private val placesRepository: com.example.byahero.core.data.repository.PlacesRepository,
+    private val settingsRepository: SettingsRepository,
+    private val notificationHelper: NotificationHelper
 ) : ViewModel() {
 
     private val _routes = MutableStateFlow<List<com.example.byahero.core.data.model.Route>>(emptyList())
@@ -469,6 +474,21 @@ class MapViewModel @Inject constructor(
         )
         _navigationState.value = navState
         monitorJourney(navState)
+
+        // Show initial distance notification
+        viewModelScope.launch {
+            if (settingsRepository.isNotificationsEnabled.first() && settingsRepository.notifyJeepneyDistance.first()) {
+                val dist = if (fullRoute.isNotEmpty()) {
+                    calculateForwardDistance(fullRoute, jeep.currentLocation, pickupLoc)
+                } else {
+                    calculateDistance(jeep.currentLocation, pickupLoc)
+                }
+                notificationHelper.showJourneyNotification(
+                    "Jeepney Selected",
+                    "Your jeepney is ${String.format(Locale.US, "%.1f", dist / 1000.0)} km away."
+                )
+            }
+        }
     }
 
     private fun monitorJourney(nav: NavigationState.Navigating) {
@@ -494,6 +514,18 @@ class MapViewModel @Inject constructor(
                     
                     val distToPickup = calculateDistance(jeep.currentLocation, pickupLoc)
                     val isJeepNear = distToPickup < 500f
+
+                    // Notify when jeep is near
+                    if (isJeepNear && currentNav.journeyState != JourneyState.Onboard && currentNav.journeyState != JourneyState.ApproachingDropoff) {
+                        viewModelScope.launch {
+                            if (settingsRepository.isNotificationsEnabled.first() && settingsRepository.notifyJeepneyNear.first()) {
+                                notificationHelper.showJourneyNotification(
+                                    "Jeepney is Near!",
+                                    "Your jeepney is approaching the pickup point."
+                                )
+                            }
+                        }
+                    }
                     
                     var isPastPickup = false
                     if (fullRoute.isNotEmpty() && (currentNav.journeyState == JourneyState.WalkingToPickup || currentNav.journeyState == JourneyState.WaitingForJeep)) {
@@ -537,6 +569,14 @@ class MapViewModel @Inject constructor(
                             val distToDropoff = if (remainingPath.isNotEmpty()) calculatePathDistance(remainingPath) else 0f
                             if (distToDropoff < 100f) {
                                 nextState = nextState.copy(journeyState = JourneyState.ApproachingDropoff)
+                                viewModelScope.launch {
+                                    if (settingsRepository.isNotificationsEnabled.first() && settingsRepository.notifyStopDistance.first()) {
+                                        notificationHelper.showJourneyNotification(
+                                            "Almost There!",
+                                            "You are approaching your drop-off point."
+                                        )
+                                    }
+                                }
                             }
                         }
                         else -> {}
@@ -703,7 +743,8 @@ class MapViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                _error.value = "Failed to load routes"
+                _error.value = "Failed to load routes: ${e.message}"
+                e.printStackTrace()
             } finally {
                 _isLoading.value = false
             }

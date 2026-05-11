@@ -20,6 +20,7 @@ rootProject.name = "ByaHero"
 include(":app")
 include(":core:ui")
 include(":core:data")
+include(":core:common")
 include(":feature:splash")
 include(":feature:auth")
 include(":feature:map")

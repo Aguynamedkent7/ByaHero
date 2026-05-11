@@ -1,9 +1,11 @@
 package com.example.byahero.core.data.repository
 
 import com.example.byahero.core.data.SupabaseConfig
+import com.example.byahero.core.data.model.UserProfile
 import com.russhwolf.settings.Settings
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.auth.user.UserUpdateBuilder
 import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.flow.Flow
@@ -15,6 +17,29 @@ private data class ProfileEmail(val email: String)
 
 @Serializable
 private data class ProfileRole(val role: String)
+
+@Serializable
+private data class UserProfileDto(
+    val id: String,
+    val username: String?,
+    val email: String?,
+    val full_name: String?,
+    val avatar_url: String? = null,
+    val role: String? = "commuter",
+    val updated_at: String? = null,
+    val is_sharing_location: Boolean = false
+) {
+    fun toDomain() = UserProfile(
+        id = id,
+        username = username,
+        email = email,
+        fullName = full_name,
+        avatarUrl = avatar_url,
+        role = role,
+        updatedAt = updated_at,
+        isSharingLocation = is_sharing_location
+    )
+}
 
 class AuthRepositoryImpl : AuthRepository {
     
@@ -36,6 +61,35 @@ class AuthRepositoryImpl : AuthRepository {
             profile?.role
         } catch (e: Exception) {
             null
+        }
+    }
+
+    override suspend fun getUserProfile(userId: String): UserProfile? {
+        return try {
+            val profileDto = db["profiles"].select {
+                filter {
+                    eq("id", userId)
+                }
+            }.decodeSingleOrNull<UserProfileDto>()
+            profileDto?.toDomain()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    override suspend fun updateUsername(userId: String, newUsername: String) {
+        db["profiles"].update(
+            mapOf("username" to newUsername)
+        ) {
+            filter {
+                eq("id", userId)
+            }
+        }
+    }
+
+    override suspend fun updatePassword(newPassword: String) {
+        auth.updateUser {
+            password = newPassword
         }
     }
 

@@ -42,6 +42,7 @@ android {
 dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:data"))
+    implementation(project(":core:common"))
     
     // Supabase
     implementation(libs.supabase.auth)

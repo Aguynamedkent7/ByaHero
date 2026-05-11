@@ -9,5 +9,7 @@ data class Route(
     val name: String,
     val code: String,
     @SerialName("path_coordinates")
-    val pathCoordinates: List<List<Double>>
+    val pathCoordinates: List<List<Double>>,
+    @SerialName("created_at")
+    val createdAt: String? = null
 )
