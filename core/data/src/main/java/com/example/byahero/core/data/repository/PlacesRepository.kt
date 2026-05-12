@@ -11,4 +11,5 @@ data class PlacePrediction(
 interface PlacesRepository {
     suspend fun getPredictions(query: String): List<PlacePrediction>
     suspend fun getPlaceCoordinates(placeId: String): LatLng?
+    suspend fun getAddressFromCoordinates(latLng: LatLng): String?
 }

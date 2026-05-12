@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.Dot
 import com.google.android.gms.maps.model.Gap
@@ -59,6 +60,8 @@ fun MapScreen(
     val navigationState by viewModel.navigationState.collectAsState()
     val userRole by viewModel.userRole.collectAsState()
     val userLocation by viewModel.userLocation.collectAsState()
+    val userAddress by viewModel.userAddress.collectAsState()
+    val savedPlaces by viewModel.savedPlaces.collectAsState()
     val isSharingLocation by viewModel.isSharingLocation.collectAsState()
     val driverBearing by viewModel.driverBearing.collectAsState()
     val coroutineScope = rememberCoroutineScope()
@@ -84,6 +87,8 @@ fun MapScreen(
     var isAutoFollowEnabled by remember { mutableStateOf(true) }
     var previewedJeepId by remember { mutableStateOf<String?>(null) }
     var lastNavigatedJeepId by remember { mutableStateOf<String?>(null) }
+    var showNameDialog by remember { mutableStateOf(false) }
+    var pinpointedName by remember { mutableStateOf("") }
 
     // Detect manual movement
     LaunchedEffect(cameraPositionState.isMoving, navigationState) {
@@ -100,6 +105,13 @@ fun MapScreen(
         if (!isAutoFollowEnabled) {
             kotlinx.coroutines.delay(10000)
             isAutoFollowEnabled = true
+        }
+    }
+
+    // Update pinpoint center
+    LaunchedEffect(cameraPositionState.isMoving) {
+        if (!cameraPositionState.isMoving && navigationState is NavigationState.PinpointingLocation) {
+            viewModel.updatePinpointCenter(cameraPositionState.position.target)
         }
     }
 
@@ -123,6 +135,8 @@ fun MapScreen(
                     cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(state.destination, 15f))
                 } 
             }
+        } else if (state is NavigationState.PinpointingLocation) {
+            cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(state.currentCenter, 17f))
         } else {
             lastNavigatedJeepId = null
         }
@@ -131,6 +145,7 @@ fun MapScreen(
     // High-frequency Camera Follow Logic
     LaunchedEffect(isAutoFollowEnabled, navigationState) {
         if (!isAutoFollowEnabled && navigationState !is NavigationState.DriverNavigating) return@LaunchedEffect
+        if (navigationState is NavigationState.PinpointingLocation) return@LaunchedEffect
 
         androidx.compose.runtime.snapshotFlow { 
             Triple(navigationState, userLocation, driverBearing)
@@ -146,7 +161,7 @@ fun MapScreen(
                     cameraPositionState.move(
                         CameraUpdateFactory.newCameraPosition(
                             CameraPosition.Builder()
-                                .target(loc!!)
+                                .target(loc)
                                 .zoom(18f)
                                 .bearing(bearing)
                                 .tilt(60f)
@@ -163,7 +178,7 @@ fun MapScreen(
                 }
             } else if (isLocValid) {
                 cameraPositionState.move(
-                    CameraUpdateFactory.newLatLngZoom(loc!!, 16f)
+                    CameraUpdateFactory.newLatLngZoom(loc, 16f)
                 )
             }
         }
@@ -174,7 +189,10 @@ fun MapScreen(
             is NavigationState.Searching, 
             is NavigationState.SelectingRoute, 
             is NavigationState.SelectingJeep,
-            is NavigationState.DriverNavigating -> {
+            is NavigationState.DriverNavigating,
+            is NavigationState.PinpointingLocation,
+            is NavigationState.SelectingSavedPlace,
+            is NavigationState.AddingSavedPlace -> {
                 scaffoldState.bottomSheetState.expand()
                 isAutoFollowEnabled = true
             }
@@ -201,6 +219,7 @@ fun MapScreen(
                 } else {
                     CommuterBottomSheetContent(
                         navigationState = navigationState,
+                        savedPlaces = savedPlaces,
                         isSharingLocation = isSharingLocation,
                         onToggleSharing = { viewModel.toggleLocationSharing() },
                         onCancelNavigation = { viewModel.cancelNavigation() },
@@ -212,8 +231,10 @@ fun MapScreen(
                         onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                         onPredictionSelected = { viewModel.selectPrediction(it) },
                         onRouteSelected = { option ->
-                            val dest = (navigationState as? NavigationState.SelectingRoute)?.destination ?: cameraPositionState.position.target
-                            viewModel.selectRoute(option, viewModel.userLocation.value ?: LatLng(8.4847, 124.6566), dest)
+                            val state = navigationState as? NavigationState.SelectingRoute
+                            val dest = state?.destination ?: cameraPositionState.position.target
+                            val options = state?.options ?: emptyList()
+                            viewModel.selectRoute(option, viewModel.userLocation.value ?: LatLng(8.4847, 124.6566), dest, options)
                         },
                         onJeepSelected = { jeep ->
                             if (navigationState is NavigationState.SelectingJeep) {
@@ -228,7 +249,26 @@ fun MapScreen(
                             coroutineScope.launch {
                                 cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(jeep.currentLocation, 16f))
                             }
-                        }
+                        },
+                        onQuickActionClick = { viewModel.onQuickActionClick(it) },
+                        onConfirmPinpoint = { 
+                            if ((navigationState as? NavigationState.PinpointingLocation)?.type == "Custom") {
+                                pinpointedName = ""
+                                showNameDialog = true
+                            } else {
+                                viewModel.confirmPinpoint() 
+                            }
+                        },
+                        onAddSavedPlaceClick = { viewModel.startAddingSavedPlace() },
+                        onSelectOnMapClick = { viewModel.startPinpointingCustomPlace() },
+                        onSavedPlaceSelected = { 
+                            val parts = it.location.split(",")
+                            viewModel.onDestinationSelected(LatLng(parts[0].toDouble(), parts[1].toDouble())) 
+                        },
+                        onDeleteSavedPlace = { viewModel.deleteSavedPlace(it) },
+                        onSavedPlaceSearchQueryChange = { viewModel.updateSavedPlaceSearch(it) },
+                        onSavedPlacePredictionSelected = { viewModel.selectSavedPlacePrediction(it) },
+                        onBackClick = { viewModel.navigateBack() }
                     )
                 }
             }
@@ -247,182 +287,290 @@ fun MapScreen(
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState,
                 contentPadding = innerPadding,
-                properties = MapProperties(
-                    isMyLocationEnabled = userLocation != null && navigationState !is NavigationState.DriverNavigating
-                ),
-                uiSettings = MapUiSettings(myLocationButtonEnabled = false)
+                properties = remember(userLocation, navigationState) {
+                    MapProperties(
+                        isMyLocationEnabled = userLocation != null && navigationState !is NavigationState.DriverNavigating
+                    )
+                },
+                uiSettings = remember { MapUiSettings(myLocationButtonEnabled = false) }
             ) {
-                when (val state = navigationState) {
-                    is NavigationState.Idle, is NavigationState.DriverIdle -> {
-                        routes.forEach { route ->
-                            Polyline(points = route.pathCoordinates.map {
-                                if (it[0] > 90.0) LatLng(it[1], it[0]) else LatLng(it[0], it[1])
-                            }, color = Color.LightGray, width = 12f)
-                        }
-                    }
-                    is NavigationState.DriverNavigating -> {
-                        Polyline(points = state.route.pathCoordinates.map {
-                            if (it[0] > 90.0) LatLng(it[1], it[0]) else LatLng(it[0], it[1])
-                        }, color = MaterialTheme.colorScheme.primary, width = 16f)
-                        
-                        state.passengers.forEachIndexed { index, pos ->
-                            MarkerComposable(
-                                state = rememberMarkerState(position = pos),
-                                title = "Passenger ${index + 1}",
-                                anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .background(Color.Cyan, CircleShape)
-                                        .border(2.dp, Color.White, CircleShape)
-                                )
-                            }
-                        }
-
-                        // Driver's own Jeepney Icon
-                        userLocation?.let { loc ->
-                            val driverMarkerState = rememberMarkerState(position = loc)
-                            LaunchedEffect(loc) {
-                                driverMarkerState.position = loc
-                            }
-                            MarkerComposable(
-                                state = driverMarkerState,
-                                title = "Your Jeepney",
-                                anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f)
-                            ) {
-                                JeepneyIcon(
-                                    backgroundColor = Color(0xFF00E676),
-                                    icon = Icons.Default.DirectionsBus,
-                                    isHighlighted = true,
-                                    jeepId = "YOU"
-                                )
-                            }
-                        }
-                    }
-                    is NavigationState.Navigating -> {
-                        if (state.walkToPickupPath != null) Polyline(points = state.walkToPickupPath, color = Color.DarkGray, width = 12f, pattern = listOf(Dot(), Gap(20f)))
-                        Polyline(points = state.ridePath, color = Color.Blue, width = 16f)
-                        if (state.walkToDestinationPath != null) Polyline(points = state.walkToDestinationPath, color = Color.DarkGray, width = 12f, pattern = listOf(Dot(), Gap(20f)))
-                        
-                        // New: Show path from Jeep to Pickup
-                        if (state.jeepToPickupPath != null) {
-                            Polyline(points = state.jeepToPickupPath, color = Color.Magenta, width = 14f, pattern = listOf(Dot(), Gap(10f)))
-                        }
-
-                        Marker(MarkerState(position = state.walkToPickupPath?.last() ?: state.ridePath.first()), title = "Board here")
-                        Marker(MarkerState(position = state.walkToDestinationPath?.first() ?: state.ridePath.last()), title = "Drop off here")
-                    }
-                    else -> {}
-                }
-                
-                // Show simulated jeepneys if not a driver actively driving
-                if (navigationState !is NavigationState.DriverNavigating) {
-                    simulatedJeepneys.forEach { jeep ->
-                        val isSelected = (navigationState as? NavigationState.Navigating)?.selectedJeep?.id == jeep.id
-                        val isPreviewed = previewedJeepId == jeep.id
-                        
-                        // Composite key forces a new Marker to be created when state changes
-                        val compositeKey = "${jeep.id}_${isSelected}_${isPreviewed}"
-                        
-                        key(compositeKey) {
-                            val markerColor = when {
-                                isSelected -> Color(0xFF00E676) // Bright Green (Confirmed)
-                                isPreviewed -> Color(0xFFFF9100) // Bright Orange (Previewed)
-                                else -> Color(0xFF9E9E9E) // Gray (Others)
-                            }
-                            
-                            val markerIcon = when {
-                                isSelected -> Icons.Default.Check
-                                isPreviewed -> Icons.Default.Visibility
-                                else -> Icons.Default.DirectionsBus
-                            }
-
-                            val markerState = rememberMarkerState(key = compositeKey, position = jeep.currentLocation)
-                            LaunchedEffect(jeep.currentLocation) {
-                                markerState.position = jeep.currentLocation
-                            }
-
-                            MarkerComposable(
-                                state = markerState,
-                                title = "Jeepney ${jeep.id}",
-                                alpha = if (isSelected || isPreviewed) 1.0f else 0.6f,
-                                anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f)
-                            ) {
-                                JeepneyIcon(
-                                    backgroundColor = markerColor,
-                                    icon = markerIcon,
-                                    isHighlighted = isSelected || isPreviewed,
-                                    jeepId = jeep.id.takeLast(2) // Show last 2 chars of ID
-                                )
-                            }
-                        }
-                    }
-                }
+                MapContent(
+                    navigationState = navigationState,
+                    routes = routes,
+                    simulatedJeepneys = simulatedJeepneys,
+                    userLocation = userLocation,
+                    previewedJeepId = previewedJeepId
+                )
             }
-            if (!isAutoFollowEnabled && (navigationState is NavigationState.Navigating || navigationState is NavigationState.DriverNavigating)) {
-                Button(
-                    onClick = { isAutoFollowEnabled = true },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 370.dp, end = 16.dp),
-                    shape = CircleShape,
-                    contentPadding = PaddingValues(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(Icons.Default.LocationOn, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Follow Jeep")
-                }
-            }
-            // Floating Current Location Button
-            if (navigationState !is NavigationState.DriverNavigating) {
-                FloatingActionButton(
-                    onClick = { isAutoFollowEnabled = true },
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(bottom = if (navigationState is NavigationState.Idle) 160.dp else 420.dp, end = 16.dp),
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    shape = CircleShape,
-                    elevation = FloatingActionButtonDefaults.elevation(4.dp)
-                ) {
-                    Icon(Icons.Default.MyLocation, "My Location")
-                }
-            }
+            
+            MapFloatingButtons(
+                isAutoFollowEnabled = isAutoFollowEnabled,
+                navigationState = navigationState,
+                onFollowClick = { isAutoFollowEnabled = true }
+            )
 
             if (isLoading) CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             
-            // Top Overlays
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                TopNavigationOverlay(
-                    userLocation = userLocation,
-                    onNavigateToProfile = onNavigateToProfile,
-                    onNavigateToSettings = onNavigateToSettings
-                )
-                
-                error?.let { msg ->
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer
-                        ),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                            Spacer(Modifier.width(12.dp))
-                            Text(msg, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                        }
+            MapOverlays(
+                userLocation = userLocation,
+                userAddress = userAddress,
+                error = error,
+                onNavigateToProfile = onNavigateToProfile,
+                onNavigateToSettings = onNavigateToSettings
+            )
+
+            if (showNameDialog) {
+                AlertDialog(
+                    onDismissRequest = { showNameDialog = false },
+                    title = { Text("Name this place") },
+                    text = {
+                        OutlinedTextField(
+                            value = pinpointedName,
+                            onValueChange = { pinpointedName = it },
+                            label = { Text("Place Name") },
+                            placeholder = { Text("e.g. My Gym, School") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (pinpointedName.isNotBlank()) {
+                                    val state = navigationState as? NavigationState.PinpointingLocation
+                                    state?.let { 
+                                        viewModel.confirmAddSavedPlace(pinpointedName, it.currentCenter)
+                                        viewModel.onDestinationSelected(it.currentCenter)
+                                    }
+                                    showNameDialog = false
+                                }
+                            }
+                        ) { Text("Save") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showNameDialog = false }) { Text("Cancel") }
                     }
+                )
+            }
+        }
+    }
+}
+
+@GoogleMapComposable
+@Composable
+fun MapContent(
+    navigationState: NavigationState,
+    routes: List<com.example.byahero.core.data.model.Route>,
+    simulatedJeepneys: List<JeepneyInstance>,
+    userLocation: LatLng?,
+    previewedJeepId: String?
+) {
+    when (val state = navigationState) {
+        is NavigationState.Idle, is NavigationState.DriverIdle -> {
+            routes.forEach { route ->
+                val points = remember(route.pathCoordinates) {
+                    route.pathCoordinates.map {
+                        if (it[0] > 90.0) LatLng(it[1], it[0]) else LatLng(it[0], it[1])
+                    }
+                }
+                Polyline(
+                    points = points,
+                    color = Color.LightGray,
+                    width = 12f
+                )
+            }
+        }
+        is NavigationState.DriverNavigating -> {
+            val points = remember(state.route.pathCoordinates) {
+                state.route.pathCoordinates.map {
+                    if (it[0] > 90.0) LatLng(it[1], it[0]) else LatLng(it[0], it[1])
+                }
+            }
+            Polyline(
+                points = points,
+                color = MaterialTheme.colorScheme.primary,
+                width = 16f
+            )
+
+            state.passengers.forEachIndexed { index, pos ->
+                MarkerComposable(
+                    state = rememberMarkerState(position = pos),
+                    title = "Passenger ${index + 1}",
+                    anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .background(Color.Cyan, CircleShape)
+                            .border(2.dp, Color.White, CircleShape)
+                    )
+                }
+            }
+
+            // Driver's own Jeepney Icon
+            userLocation?.let { loc ->
+                val driverMarkerState = rememberMarkerState(position = loc)
+                LaunchedEffect(loc) {
+                    driverMarkerState.position = loc
+                }
+                MarkerComposable(
+                    state = driverMarkerState,
+                    title = "Your Jeepney",
+                    anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f)
+                ) {
+                    JeepneyIcon(
+                        backgroundColor = Color(0xFF00E676),
+                        icon = Icons.Default.DirectionsBus,
+                        isHighlighted = true,
+                        jeepId = "YOU"
+                    )
+                }
+            }
+        }
+        is NavigationState.Navigating -> {
+            if (state.walkToPickupPath != null) Polyline(points = state.walkToPickupPath, color = Color.DarkGray, width = 12f, pattern = listOf(Dot(), Gap(20f)))
+            Polyline(points = state.ridePath, color = Color.Blue, width = 16f)
+            if (state.walkToDestinationPath != null) Polyline(points = state.walkToDestinationPath, color = Color.DarkGray, width = 12f, pattern = listOf(Dot(), Gap(20f)))
+
+            // New: Show path from Jeep to Pickup
+            if (state.jeepToPickupPath != null) {
+                Polyline(points = state.jeepToPickupPath, color = Color.Magenta, width = 14f, pattern = listOf(Dot(), Gap(10f)))
+            }
+
+            Marker(MarkerState(position = state.walkToPickupPath?.last() ?: state.ridePath.first()), title = "Board here")
+            Marker(MarkerState(position = state.walkToDestinationPath?.first() ?: state.ridePath.last()), title = "Drop off here")
+        }
+        is NavigationState.PinpointingLocation -> {
+            Marker(
+                state = MarkerState(position = state.currentCenter),
+                title = "Pinpoint ${state.type}",
+                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+            )
+        }
+        else -> {}
+    }
+
+    // Show simulated jeepneys if not a driver actively driving
+    if (navigationState !is NavigationState.DriverNavigating) {
+        simulatedJeepneys.forEach { jeep ->
+            val isSelected = (navigationState as? NavigationState.Navigating)?.selectedJeep?.id == jeep.id
+            val isPreviewed = previewedJeepId == jeep.id
+
+            // Composite key forces a new Marker to be created when state changes
+            val compositeKey = "${jeep.id}_${isSelected}_${isPreviewed}"
+
+            key(compositeKey) {
+                val markerColor = when {
+                    isSelected -> Color(0xFF00E676) // Bright Green (Confirmed)
+                    isPreviewed -> Color(0xFFFF9100) // Bright Orange (Previewed)
+                    else -> Color(0xFF9E9E9E) // Gray (Others)
+                }
+
+                val markerIcon = when {
+                    isSelected -> Icons.Default.Check
+                    isPreviewed -> Icons.Default.Visibility
+                    else -> Icons.Default.DirectionsBus
+                }
+
+                val markerState = rememberMarkerState(key = compositeKey, position = jeep.currentLocation)
+                LaunchedEffect(jeep.currentLocation) {
+                    markerState.position = jeep.currentLocation
+                }
+
+                MarkerComposable(
+                    state = markerState,
+                    title = "Jeepney ${jeep.id}",
+                    alpha = if (isSelected || isPreviewed) 1.0f else 0.6f,
+                    anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f)
+                ) {
+                    JeepneyIcon(
+                        backgroundColor = markerColor,
+                        icon = markerIcon,
+                        isHighlighted = isSelected || isPreviewed,
+                        jeepId = jeep.id.takeLast(2) // Show last 2 chars of ID
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MapFloatingButtons(
+    isAutoFollowEnabled: Boolean,
+    navigationState: NavigationState,
+    onFollowClick: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (!isAutoFollowEnabled && (navigationState is NavigationState.Navigating || navigationState is NavigationState.DriverNavigating)) {
+            Button(
+                onClick = onFollowClick,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 370.dp, end = 16.dp),
+                shape = CircleShape,
+                contentPadding = PaddingValues(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Icon(Icons.Default.LocationOn, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Follow Jeep")
+            }
+        }
+        // Floating Current Location Button
+        if (navigationState !is NavigationState.DriverNavigating) {
+            FloatingActionButton(
+                onClick = onFollowClick,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = if (navigationState is NavigationState.Idle) 160.dp else 420.dp, end = 16.dp),
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.primary,
+                shape = CircleShape,
+                elevation = FloatingActionButtonDefaults.elevation(4.dp)
+            ) {
+                Icon(Icons.Default.MyLocation, "My Location")
+            }
+        }
+    }
+}
+
+@Composable
+fun MapOverlays(
+    userLocation: LatLng?,
+    userAddress: String?,
+    error: String?,
+    onNavigateToProfile: () -> Unit,
+    onNavigateToSettings: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        TopNavigationOverlay(
+            userLocation = userLocation,
+            userAddress = userAddress,
+            onNavigateToProfile = onNavigateToProfile,
+            onNavigateToSettings = onNavigateToSettings
+        )
+
+        error?.let { msg ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(12.dp))
+                    Text(msg, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -463,6 +611,7 @@ fun JeepneyIcon(backgroundColor: Color, icon: ImageVector, isHighlighted: Boolea
 @Composable
 fun TopNavigationOverlay(
     userLocation: LatLng?,
+    userAddress: String?,
     modifier: Modifier = Modifier,
     onNavigateToProfile: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {}
@@ -478,7 +627,13 @@ fun TopNavigationOverlay(
             Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.LocationOn, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(if (userLocation != null) "Current Location" else "USTP CDO, Lapasan", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    text = userAddress ?: (if (userLocation != null) "Current Location" else "USTP CDO, Lapasan"),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    modifier = Modifier.widthIn(max = 200.dp)
+                )
             }
         }
     }
@@ -487,6 +642,7 @@ fun TopNavigationOverlay(
 @Composable
 fun CommuterBottomSheetContent(
     navigationState: NavigationState,
+    savedPlaces: List<com.example.byahero.core.data.repository.SavedPlace>,
     isSharingLocation: Boolean,
     onToggleSharing: () -> Unit,
     onCancelNavigation: () -> Unit,
@@ -496,7 +652,16 @@ fun CommuterBottomSheetContent(
     onPredictionSelected: (com.example.byahero.core.data.repository.PlacePrediction) -> Unit,
     onRouteSelected: (NavigationOption) -> Unit,
     onJeepSelected: (JeepneyInstance) -> Unit,
-    onJeepPreview: (JeepneyInstance) -> Unit
+    onJeepPreview: (JeepneyInstance) -> Unit,
+    onQuickActionClick: (String) -> Unit,
+    onConfirmPinpoint: () -> Unit,
+    onAddSavedPlaceClick: () -> Unit,
+    onSelectOnMapClick: () -> Unit,
+    onSavedPlaceSelected: (com.example.byahero.core.data.repository.SavedPlace) -> Unit,
+    onDeleteSavedPlace: (String) -> Unit,
+    onSavedPlaceSearchQueryChange: (String) -> Unit,
+    onSavedPlacePredictionSelected: (com.example.byahero.core.data.repository.PlacePrediction) -> Unit,
+    onBackClick: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
         when (navigationState) {
@@ -520,11 +685,93 @@ fun CommuterBottomSheetContent(
                 }
                 Spacer(Modifier.height(24.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    QuickActionItem(Icons.Default.Home, "Home")
-                    QuickActionItem(Icons.Default.Place, "Work")
-                    QuickActionItem(Icons.Default.Favorite, "Saved")
+                    QuickActionItem(Icons.Default.Home, "Home", onClick = { onQuickActionClick("Home") })
+                    QuickActionItem(Icons.Default.Place, "Work", onClick = { onQuickActionClick("Work") })
+                    QuickActionItem(Icons.Default.Favorite, "Saved", onClick = { onQuickActionClick("Saved") })
                 }
                 Spacer(Modifier.height(16.dp))
+            }
+            is NavigationState.PinpointingLocation -> {
+                Text("Pinpoint ${navigationState.type}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Move the map to center your ${navigationState.type.lowercase()} location.", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(24.dp))
+                Button(onClick = onConfirmPinpoint, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                    Text("Confirm Location")
+                }
+                OutlinedButton(onClick = onCancelNavigation, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), shape = RoundedCornerShape(16.dp)) {
+                    Text("Cancel")
+                }
+            }
+            is NavigationState.SelectingSavedPlace -> {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Saved Places", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onCancelNavigation) { Icon(Icons.Default.Close, null) }
+                }
+                Spacer(Modifier.height(16.dp))
+                if (savedPlaces.isEmpty()) {
+                    Text("You haven't saved any places yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.heightIn(max = 300.dp)) {
+                        items(savedPlaces.size) { index ->
+                            val place = savedPlaces[index]
+                            Card(Modifier.fillMaxWidth()) {
+                                Row(Modifier.padding(16.dp).clickable { onSavedPlaceSelected(place) }, verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Place, null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(16.dp))
+                                    Text(place.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                                    IconButton(onClick = { onDeleteSavedPlace(place.id) }) {
+                                        Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = onAddSavedPlaceClick, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Add New Place")
+                }
+            }
+            is NavigationState.AddingSavedPlace -> {
+                Text("Add Saved Place", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = onSelectOnMapClick,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                ) {
+                    Icon(Icons.Default.Map, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Select on Map")
+                }
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 32.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = navigationState.query,
+                    onValueChange = onSavedPlaceSearchQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Search place name...") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    trailingIcon = { IconButton(onClick = { onCancelNavigation() }) { Icon(Icons.Default.Close, null) } },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp)
+                )
+                Spacer(Modifier.height(16.dp))
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.heightIn(max = 400.dp)) {
+                    items(navigationState.predictions.size) { index ->
+                        val prediction = navigationState.predictions[index]
+                        Card(Modifier.fillMaxWidth().clickable { onSavedPlacePredictionSelected(prediction) }) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text(prediction.primaryText, style = MaterialTheme.typography.titleMedium)
+                                Text(prediction.secondaryText, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
             }
             is NavigationState.Searching -> {
                 OutlinedTextField(
@@ -551,7 +798,10 @@ fun CommuterBottomSheetContent(
                 }
             }
             is NavigationState.SelectingRoute -> {
-                Text("Select a Jeepney Route", style = MaterialTheme.typography.titleLarge)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onBackClick) { Icon(Icons.Default.ArrowBack, "Back") }
+                    Text("Select a Jeepney Route", style = MaterialTheme.typography.titleLarge)
+                }
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(navigationState.options.size) { index ->
                         val option = navigationState.options[index]
@@ -566,8 +816,11 @@ fun CommuterBottomSheetContent(
                 }
             }
             is NavigationState.SelectingJeep -> {
-                Text("Select an Oncoming Jeepney", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text("Route: ${navigationState.option.routeName}", style = MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onBackClick) { Icon(Icons.Default.ArrowBack, "Back") }
+                    Text("Select an Oncoming Jeepney", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                }
+                Text("Route: ${navigationState.option.routeName}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 48.dp))
                 Spacer(Modifier.height(16.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(navigationState.jeeps.size) { index ->
@@ -640,8 +893,8 @@ fun CommuterBottomSheetContent(
 }
 
 @Composable
-fun QuickActionItem(icon: ImageVector, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+fun QuickActionItem(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onClick() }) {
         Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.size(48.dp)) {
             Icon(icon, label, modifier = Modifier.padding(12.dp))
         }

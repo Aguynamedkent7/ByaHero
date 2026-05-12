@@ -1,6 +1,8 @@
 package com.example.byahero.feature.map
 
 import android.location.Location
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.byahero.core.common.notification.NotificationHelper
@@ -10,6 +12,7 @@ import com.example.byahero.core.data.repository.LocationRepository
 import com.example.byahero.core.data.repository.RouteRepository
 import com.example.byahero.core.data.repository.SettingsRepository
 import com.example.byahero.core.data.repository.WalkingPath
+import com.example.byahero.core.data.repository.SavedPlace
 import com.google.android.gms.maps.model.LatLng
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -25,11 +28,16 @@ import java.util.Locale
 import javax.inject.Inject
 import kotlin.math.*
 
+@Stable
 sealed class NavigationState {
     object Idle : NavigationState()
+    @Immutable
     data class Searching(val query: String = "", val predictions: List<com.example.byahero.core.data.repository.PlacePrediction> = emptyList()) : NavigationState()
+    @Immutable
     data class SelectingRoute(val destination: LatLng, val options: List<NavigationOption>) : NavigationState()
-    data class SelectingJeep(val option: NavigationOption, val origin: LatLng, val destination: LatLng, val jeeps: List<JeepneyInstance>) : NavigationState()
+    @Immutable
+    data class SelectingJeep(val option: NavigationOption, val origin: LatLng, val destination: LatLng, val jeeps: List<JeepneyInstance>, val allOptions: List<NavigationOption> = emptyList()) : NavigationState()
+    @Immutable
     data class Navigating(
         val origin: LatLng,
         val destination: LatLng,
@@ -43,10 +51,20 @@ sealed class NavigationState {
         val journeyState: JourneyState = JourneyState.WalkingToPickup,
         val isJeepNear: Boolean = false
     ) : NavigationState()
+
+    @Immutable
+    data class PinpointingLocation(val type: String, val currentCenter: LatLng) : NavigationState()
+
+    object SelectingSavedPlace : NavigationState()
     
+    @Immutable
+    data class AddingSavedPlace(val query: String = "", val predictions: List<com.example.byahero.core.data.repository.PlacePrediction> = emptyList()) : NavigationState()
+
     // Driver States
     object DriverIdle : NavigationState()
+    @Immutable
     data class DriverSelectingRoute(val availableRoutes: List<com.example.byahero.core.data.model.Route>) : NavigationState()
+    @Immutable
     data class DriverNavigating(
         val route: com.example.byahero.core.data.model.Route,
         val passengers: List<LatLng>
@@ -60,6 +78,7 @@ enum class JourneyState {
     ApproachingDropoff
 }
 
+@Immutable
 data class JeepneyInstance(
     val id: String,
     val routeCode: String,
@@ -67,6 +86,7 @@ data class JeepneyInstance(
     val etaMinutes: Int = 0
 )
 
+@Immutable
 data class NavigationOption(
     val routeName: String,
     val routeCode: String,
@@ -80,12 +100,12 @@ data class NavigationOption(
     val rideDistanceText = "${String.format(Locale.US, "%.1f", rideMeters / 1000.0)} km ride"
 }
 
+@Immutable
 data class ProjectedPoint(
     val point: LatLng,
     val segmentIndex: Int,
     val distance: Float
 )
-
 @HiltViewModel
 class MapViewModel @Inject constructor(
     private val routeRepository: com.example.byahero.core.data.repository.RouteRepository,
@@ -112,6 +132,9 @@ class MapViewModel @Inject constructor(
     private val _userLocation = MutableStateFlow<LatLng?>(null)
     val userLocation: StateFlow<LatLng?> = _userLocation.asStateFlow()
 
+    private val _userAddress = MutableStateFlow<String?>(null)
+    val userAddress: StateFlow<String?> = _userAddress.asStateFlow()
+
     private val _isSharingLocation = MutableStateFlow(false)
     val isSharingLocation: StateFlow<Boolean> = _isSharingLocation.asStateFlow()
 
@@ -124,6 +147,15 @@ class MapViewModel @Inject constructor(
     private val _driverBearing = MutableStateFlow(0f)
     val driverBearing: StateFlow<Float> = _driverBearing.asStateFlow()
 
+    private val _homeLocation = MutableStateFlow<LatLng?>(null)
+    val homeLocation: StateFlow<LatLng?> = _homeLocation.asStateFlow()
+
+    private val _workLocation = MutableStateFlow<LatLng?>(null)
+    val workLocation: StateFlow<LatLng?> = _workLocation.asStateFlow()
+
+    private val _savedPlaces = MutableStateFlow<List<SavedPlace>>(emptyList())
+    val savedPlaces: StateFlow<List<SavedPlace>> = _savedPlaces.asStateFlow()
+
     private var searchJob: Job? = null
     private var currentUserId: String? = null
     private var locationJob: Job? = null
@@ -134,6 +166,119 @@ class MapViewModel @Inject constructor(
     init {
         loadRoutes()
         observeCurrentUser()
+        observeSavedLocations()
+    }
+
+    private fun observeSavedLocations() {
+        viewModelScope.launch {
+            settingsRepository.homeLocation.collect { locStr ->
+                _homeLocation.value = locStr?.toLatLng()
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.workLocation.collect { locStr ->
+                _workLocation.value = locStr?.toLatLng()
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.savedPlaces.collect { places ->
+                _savedPlaces.value = places
+            }
+        }
+    }
+
+    private fun String.toLatLng(): LatLng? {
+        return try {
+            val parts = this.split(",")
+            LatLng(parts[0].toDouble(), parts[1].toDouble())
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun LatLng.toLocString(): String = "${latitude},${longitude}"
+
+    fun onQuickActionClick(type: String) {
+        when (type) {
+            "Home" -> {
+                _homeLocation.value?.let { onDestinationSelected(it) } 
+                    ?: run { _navigationState.value = NavigationState.PinpointingLocation("Home", _userLocation.value ?: defaultOrigin) }
+            }
+            "Work" -> {
+                _workLocation.value?.let { onDestinationSelected(it) } 
+                    ?: run { _navigationState.value = NavigationState.PinpointingLocation("Work", _userLocation.value ?: defaultOrigin) }
+            }
+            "Saved" -> {
+                _navigationState.value = NavigationState.SelectingSavedPlace
+            }
+        }
+    }
+
+    fun startAddingSavedPlace() {
+        _navigationState.value = NavigationState.AddingSavedPlace()
+    }
+
+    fun startPinpointingCustomPlace() {
+        _navigationState.value = NavigationState.PinpointingLocation("Custom", _userLocation.value ?: defaultOrigin)
+    }
+
+    fun updateSavedPlaceSearch(query: String) {
+        val currentState = _navigationState.value as? NavigationState.AddingSavedPlace ?: return
+        _navigationState.value = currentState.copy(query = query)
+        
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(300)
+            val predictions = placesRepository.getPredictions(query)
+            val currentNavState = _navigationState.value
+            if (currentNavState is NavigationState.AddingSavedPlace && currentNavState.query == query) {
+                _navigationState.value = currentNavState.copy(predictions = predictions)
+            }
+        }
+    }
+
+    fun selectSavedPlacePrediction(prediction: com.example.byahero.core.data.repository.PlacePrediction) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            val coordinates = placesRepository.getPlaceCoordinates(prediction.placeId)
+            if (coordinates != null) {
+                confirmAddSavedPlace(prediction.primaryText, coordinates)
+            }
+            _isLoading.value = false
+        }
+    }
+
+    fun deleteSavedPlace(id: String) {
+        viewModelScope.launch {
+            settingsRepository.deleteSavedPlace(id)
+        }
+    }
+
+    fun updatePinpointCenter(center: LatLng) {
+        val currentState = _navigationState.value as? NavigationState.PinpointingLocation ?: return
+        _navigationState.value = currentState.copy(currentCenter = center)
+    }
+
+    fun confirmPinpoint() {
+        val state = _navigationState.value as? NavigationState.PinpointingLocation ?: return
+        val locString = state.currentCenter.toLocString()
+        
+        viewModelScope.launch {
+            when (state.type) {
+                "Home" -> settingsRepository.setHomeLocation(locString)
+                "Work" -> settingsRepository.setWorkLocation(locString)
+                else -> {}
+            }
+            _navigationState.value = NavigationState.Idle
+            onDestinationSelected(state.currentCenter)
+        }
+    }
+
+    fun confirmAddSavedPlace(name: String, location: LatLng) {
+        viewModelScope.launch {
+            settingsRepository.addSavedPlace(name, location.toLocString())
+            _navigationState.value = NavigationState.SelectingSavedPlace
+        }
     }
 
     private fun observeCurrentUser() {
@@ -191,7 +336,16 @@ class MapViewModel @Inject constructor(
         if (locationJob != null) return
         locationJob = viewModelScope.launch {
             locationRepository.getDeviceLocation().collectLatest { location ->
+                val prevLoc = _userLocation.value
                 _userLocation.value = location
+                
+                // Only update address if location changed significantly (> 10m) or address is null
+                if (_userAddress.value == null || prevLoc == null || calculateDistance(prevLoc, location) > 10f) {
+                    viewModelScope.launch {
+                        _userAddress.value = placesRepository.getAddressFromCoordinates(location)
+                    }
+                }
+
                 if (_isSharingLocation.value) {
                     currentUserId?.let { userId ->
                         locationRepository.updateRemoteLocation(userId, location)
@@ -225,6 +379,40 @@ class MapViewModel @Inject constructor(
 
     fun cancelNavigation() {
         _navigationState.value = NavigationState.Idle
+    }
+
+    fun navigateBack() {
+        when (val state = _navigationState.value) {
+            is NavigationState.SelectingRoute -> {
+                _navigationState.value = NavigationState.Idle
+            }
+            is NavigationState.SelectingJeep -> {
+                if (state.allOptions.size > 1) {
+                    _navigationState.value = NavigationState.SelectingRoute(state.destination, state.allOptions)
+                } else {
+                    _navigationState.value = NavigationState.Idle
+                }
+            }
+            is NavigationState.Searching -> {
+                _navigationState.value = NavigationState.Idle
+            }
+            is NavigationState.SelectingSavedPlace -> {
+                _navigationState.value = NavigationState.Idle
+            }
+            is NavigationState.AddingSavedPlace -> {
+                _navigationState.value = NavigationState.SelectingSavedPlace
+            }
+            is NavigationState.PinpointingLocation -> {
+                if (state.type == "Custom") {
+                    _navigationState.value = NavigationState.AddingSavedPlace()
+                } else {
+                    _navigationState.value = NavigationState.Idle
+                }
+            }
+            else -> {
+                _navigationState.value = NavigationState.Idle
+            }
+        }
     }
 
     private var driverSimulationJob: Job? = null
@@ -263,7 +451,7 @@ class MapViewModel @Inject constructor(
                 val startPoint = path[currentIndex]
                 val nextIndex = (currentIndex + 1) % path.size
                 val endPoint = path[nextIndex]
-                val frameRateMs = 16f // 60fps updates for ultra-smooth movement
+                val frameRateMs = 33L // ~30fps updates for smooth movement without excessive CPU usage
                 var elapsedTime = 0f
                 
                 val bearing = calculateBearing(startPoint, endPoint)
@@ -273,7 +461,7 @@ class MapViewModel @Inject constructor(
                     val fraction = elapsedTime / segmentDurationMs.toFloat()
                     val newLoc = interpolate(fraction, startPoint, endPoint)
                     _userLocation.value = newLoc
-                    delay(frameRateMs.toLong())
+                    delay(frameRateMs)
                     elapsedTime += frameRateMs
                 }
                 _userLocation.value = endPoint
@@ -347,7 +535,7 @@ class MapViewModel @Inject constructor(
             // 4. Evaluate all combinations for each route to find the "Best Effort" option
             val options = routeCandidateMap.mapNotNull { entry ->
                 val routeData = entry.key
-                val candidates = entry.value ?: return@mapNotNull null
+                val candidates = entry.value
                 val (pickups, dropoffs) = candidates
                 val routePath = routeData.pathCoordinates.map { it.toLatLng() }
                 
@@ -395,7 +583,7 @@ class MapViewModel @Inject constructor(
                 // Final sort: prioritize lowest walking distance, then lowest ride distance
                 val sortedOptions = options.sortedBy { it.totalWalkMeters + (it.rideMeters / 5.0) }
                 if (sortedOptions.size == 1) {
-                    showJeepSelection(sortedOptions.first(), currentOrigin, destination)
+                    showJeepSelection(sortedOptions.first(), currentOrigin, destination, sortedOptions)
                 } else {
                     _navigationState.value = NavigationState.SelectingRoute(destination, sortedOptions)
                 }
@@ -427,7 +615,7 @@ class MapViewModel @Inject constructor(
         return totalDist
     }
 
-    fun showJeepSelection(option: NavigationOption, origin: LatLng, destination: LatLng) {
+    fun showJeepSelection(option: NavigationOption, origin: LatLng, destination: LatLng, allOptions: List<NavigationOption> = emptyList()) {
         val pickupPoint = option.walkToPickupPath.lastOrNull() ?: option.ridePath.first()
         val fullRoute = _routes.value.find { it.code == option.routeCode }?.pathCoordinates?.map { it.toLatLng() } ?: emptyList()
 
@@ -444,7 +632,7 @@ class MapViewModel @Inject constructor(
             }
             .sortedBy { it.etaMinutes }
 
-        _navigationState.value = NavigationState.SelectingJeep(option, origin, destination, relevantJeeps)
+        _navigationState.value = NavigationState.SelectingJeep(option, origin, destination, relevantJeeps, allOptions)
     }
 
     fun selectJeep(jeep: JeepneyInstance, state: NavigationState.SelectingJeep) {
@@ -594,8 +782,8 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    fun selectRoute(option: NavigationOption, origin: LatLng, destination: LatLng) {
-        showJeepSelection(option, origin, destination)
+    fun selectRoute(option: NavigationOption, origin: LatLng, destination: LatLng, allOptions: List<NavigationOption> = emptyList()) {
+        showJeepSelection(option, origin, destination, allOptions)
     }
 
     fun clearError() {

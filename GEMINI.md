@@ -51,11 +51,8 @@ The project will follow a **Feature-based Multi-module** structure:
 - [ ] **Map:** Integrate Google Maps SDK and implement real-time location updates in `:feature:map`.
 - [ ] **Search:** Develop route recommendation logic and UI in `:feature:search`.
 - [ ] **Real-time:** Implement location sharing between Commuters and Drivers using Supabase Realtime.
-- [ ] **UI/UX:** Build a consistent design system in `:core:ui` following the provided wireframes.
-- [ ] **Performance:** Implement Baseline Profiles and R8 configurations.
-ters and Drivers using Supabase Realtime.
 - [ ] **UI/UX:** Build a consistent design system in `:core:ui`.
-- [ ] **Performance:** Implement Baseline Profiles and R8 configurations.
+- [x] **Performance:** Implement Baseline Profiles, R8 configurations, and Compose stability.
 - [x] **qol:** extract username from email.
 - [x] **qol:** allow username or email when logging in .
 - [ ] **logic:** Only Show routes when pressed or recommended after searching where to go.

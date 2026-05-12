@@ -1,6 +1,7 @@
 package com.example.byahero.core.data.repository
 
 import android.content.Context
+import android.location.Geocoder
 import com.example.byahero.core.data.BuildConfig
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.libraries.places.api.Places
@@ -9,9 +10,12 @@ import com.google.android.libraries.places.api.model.Place
 import com.google.android.libraries.places.api.net.FetchPlaceRequest
 import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest
 import com.google.android.libraries.places.api.net.PlacesClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import java.util.Locale
 
-class PlacesRepositoryImpl(context: Context) : PlacesRepository {
+class PlacesRepositoryImpl(private val context: Context) : PlacesRepository {
 
     private val placesClient: PlacesClient
 
@@ -52,6 +56,27 @@ class PlacesRepositoryImpl(context: Context) : PlacesRepository {
         return try {
             val response = placesClient.fetchPlace(request).await()
             response.place.latLng
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    override suspend fun getAddressFromCoordinates(latLng: LatLng): String? = withContext(Dispatchers.IO) {
+        try {
+            val geocoder = Geocoder(context, Locale.getDefault())
+            val addresses = geocoder.getFromLocation(latLng.latitude, latLng.longitude, 1)
+            if (!addresses.isNullOrEmpty()) {
+                val address = addresses[0]
+                val featureName = address.featureName
+                val thoroughfare = address.thoroughfare
+                val locality = address.locality
+                
+                when {
+                    thoroughfare != null -> "$thoroughfare, $locality"
+                    featureName != null -> "$featureName, $locality"
+                    else -> address.getAddressLine(0)
+                }
+            } else null
         } catch (e: Exception) {
             null
         }

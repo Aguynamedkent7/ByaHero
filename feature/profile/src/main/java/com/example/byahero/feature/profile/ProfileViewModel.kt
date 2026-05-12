@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.byahero.core.data.model.UserProfile
 import com.example.byahero.core.data.repository.AuthRepository
+import com.example.byahero.core.data.repository.SavedPlace
+import com.example.byahero.core.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,6 +15,9 @@ import javax.inject.Inject
 
 data class ProfileUiState(
     val userProfile: UserProfile? = null,
+    val homeLocation: String? = null,
+    val workLocation: String? = null,
+    val savedPlaces: List<SavedPlace> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
     val updateSuccess: Boolean = false
@@ -20,7 +25,8 @@ data class ProfileUiState(
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProfileUiState())
@@ -28,6 +34,47 @@ class ProfileViewModel @Inject constructor(
 
     init {
         loadProfile()
+        observeSavedPlaces()
+        observeHomeWork()
+    }
+
+    private fun observeSavedPlaces() {
+        viewModelScope.launch {
+            settingsRepository.savedPlaces.collect { places ->
+                _uiState.value = _uiState.value.copy(savedPlaces = places)
+            }
+        }
+    }
+
+    private fun observeHomeWork() {
+        viewModelScope.launch {
+            settingsRepository.homeLocation.collect { loc ->
+                _uiState.value = _uiState.value.copy(homeLocation = loc)
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.workLocation.collect { loc ->
+                _uiState.value = _uiState.value.copy(workLocation = loc)
+            }
+        }
+    }
+
+    fun deleteHomeLocation() {
+        viewModelScope.launch {
+            settingsRepository.setHomeLocation(null)
+        }
+    }
+
+    fun deleteWorkLocation() {
+        viewModelScope.launch {
+            settingsRepository.setWorkLocation(null)
+        }
+    }
+
+    fun deleteSavedPlace(id: String) {
+        viewModelScope.launch {
+            settingsRepository.deleteSavedPlace(id)
+        }
     }
 
     fun loadProfile() {
